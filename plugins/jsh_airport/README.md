@@ -41,15 +41,23 @@ are none of those either, the dropdown shows why it is empty rather than nothing
 at all. A typed name always works.
 
 ### If the dropdown is empty
-It means the mission never answered. In order of likelihood:
-1. `mission.lua` isn't loaded. `dcs.log` should have `[jsh_airport] loaded`.
-   The bot copies it to
-   `Saved Games/<instance>/Scripts/net/DCSServerBot/jsh_airport/mission.lua`
-   at **bot startup**, so installing the plugin needs a bot restart and then a
-   DCS server restart.
-2. The mission is running an older `mission.lua` without the function being
-   called — again, restart the mission.
-3. The plugin is disabled for that instance in `jsh_airport.yaml`.
+The dropdown says which of these it is, rather than showing nothing.
+
+- **"loading airbases from the mission"** — normal on the first use after a
+  mission starts. Discord gives autocomplete about 3 seconds and the round trip
+  through DCS can take longer, so the first attempt may miss. The reply is
+  cached when it lands, so typing another letter fills the list.
+- **"cannot read airbases: ..."** — the mission did not answer. Check `dcs.log`
+  for `[jsh_airport] loaded`. The bot copies `mission.lua` to
+  `Saved Games/<instance>/Scripts/net/DCSServerBot/jsh_airport/mission.lua`
+  at **bot startup**, so installing the plugin needs a bot restart followed by a
+  DCS server restart. A mission running an older `mission.lua` reports that
+  directly.
+
+`dcs.log` also shows `[jsh_airport] listed N airbases` each time the list is
+read, which is the quickest way to tell a mission-side problem from a bot-side
+one: if that line appears and the dropdown is still empty, the problem is in the
+bot.
 
 ## Warehouse sheets
 Use exports from `/airbase info` unchanged: sheets Aircraft, Weapons, Liquids

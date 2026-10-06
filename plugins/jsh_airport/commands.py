@@ -87,9 +87,11 @@ async def airbase_autocomplete(interaction: discord.Interaction, current: str) -
             # Nothing live and nothing stored: an empty dropdown with no reason is
             # the worst outcome, so put the reason in front of the GM. Typing a
             # name still works, and the command itself reports the real error.
-            why = problem or "no airbases returned by the mission"
-            choices = [app_commands.Choice(
-                name=f"[cannot read airbases: {why}]"[:100], value=current or "?")]
+            if problem == "still loading":
+                label = "[loading airbases from the mission - type another letter]"
+            else:
+                label = f"[cannot read airbases: {problem or 'the mission returned none'}]"
+            choices = [app_commands.Choice(name=label[:100], value=current or "?")]
     return choices[:25]
 
 
@@ -132,7 +134,8 @@ class Airport(Plugin[AirportEventListener]):
         try:
             return await asyncio.wait_for(future, timeout)
         except asyncio.TimeoutError:
-            return {"ok": False, "error": "no reply from the mission (is the plugin's mission.lua loaded?)"}
+            return {"ok": False, "timeout": True,
+                    "error": "no reply from the mission (is the plugin's mission.lua loaded?)"}
         finally:
             self.pending.pop(request_id, None)
 
@@ -151,6 +154,11 @@ class Airport(Plugin[AirportEventListener]):
             if skipped:
                 self.log.warning(f"Airport: {server.name} skipped {skipped} airbase(s) "
                                  f"the mission could not describe")
+        elif result.get('timeout'):
+            # Distinguishes a slow round trip from a broken one: the reply often
+            # lands just after a short autocomplete timeout, and the listener
+            # caches it when it does.
+            problem = "still loading"
         elif not result.get('ok'):
             problem = result.get('error') or "the mission did not reply"
             self.log.warning(f"Airport: could not list airbases on {server.name}: {problem}")

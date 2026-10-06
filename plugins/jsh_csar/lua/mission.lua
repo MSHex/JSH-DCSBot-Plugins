@@ -61,13 +61,6 @@ function CS.pay(name, points, reason, announce)
   log(string.format("%s +%d (%s)", name, points, reason))
 end
 
--- Called by the bot to show a player a message (award notifications).
-function CS.message(name, text)
-  local unit = findPlayerUnit(name)
-  local grp = unit and unit:getGroup()
-  if grp then trigger.action.outTextForGroup(grp:getID(), text, 15) end
-end
-
 ---------------------------------------------------------------- JOKER ADV_CSAR
 -- ADV_CSAR.OnRescueCallback(clientObj, passengers) fires on drop-off at a
 -- friendly airfield/FARP, and on auto-rescue (clientObj = nil, nobody to pay).

@@ -31,7 +31,6 @@ first, so this doesn't replace an existing token economy hook.
 ## Commands
 - `/csar stats [user]` — rescues by pilot status for a player.
 - `/csar top [pilot_status] [limit]` — leaderboard.
-- `/csar awards [user]` — progress toward each configured award.
 - `/csar history server [limit]` — recent rescues on a server (DCS Admin / GameMaster).
 
 ## Credits log
@@ -51,20 +50,21 @@ stay `Critical`, `RedPilot` and so on while players read "critical pilot" and
 - `jsh_csar_rescues` — event log, one row per rescue event and pilot status:
   server, ucid, name, status, count, credits, reason, source, dynamic flag, timestamp.
 - `jsh_csar_dynamic` — dynamic campaign only, totals per `(player_ucid, pilot_status)`
-  with credits, last reason and last rescue. Awards are calculated from this.
+  with credits, last reason and last rescue.
   A server feeds it only when `dynamic_campaign: true` is set for that instance.
 - `jsh_csar_totals` — every server and every CSAR script, one row per player:
-  total pilots rescued, credits, last reason, last rescue. This is the logbook figure.
+  total pilots rescued, credits, last reason, last rescue.
 
 Both totals tables key on `player_ucid` (FK to `players.ucid`), the key the logbook
-and userstats plugins use, so they join directly:
+and userstats plugins use, so they join directly. This plugin grants no awards of
+its own -- these tables are the source another plugin builds them from:
 
 ```sql
 -- pilots rescued, all servers
 SELECT p.name, t.rescues
 FROM jsh_csar_totals t JOIN players p ON p.ucid = t.player_ucid;
 
--- award candidates: 10+ critical pilots in the dynamic campaign
+-- 10+ critical pilots rescued in the dynamic campaign
 SELECT p.name, d.rescues
 FROM jsh_csar_dynamic d JOIN players p ON p.ucid = d.player_ucid
 WHERE d.pilot_status = 'Critical' AND d.rescues >= 10;
@@ -75,15 +75,3 @@ the YAML keeps the counts without paying credits.
 
 Upgrading from 1.0: `db/update_v1.0.sql` adds the new columns, creates
 `jsh_csar_dynamic`, and rebuilds `jsh_csar_totals` per player.
-
-## Logbook awards
-Create the award in Discord first (`/award create`), then list it under `awards:`
-in the YAML with a threshold. The plugin grants it once, with a citation such as
-"25 Critical pilots rescued", and it appears in `/logbook pilot` and
-`/award ribbon`. `pilot_status: any` counts every rescue on every server;
-a specific status counts the dynamic campaign only.
-
-Grants are written straight into `logbook_pilot_awards`. The column names are
-detected at runtime, so a logbook schema change disables awards with a warning
-in the bot log rather than breaking rescues. Everything else keeps working if
-the logbook plugin isn't installed.

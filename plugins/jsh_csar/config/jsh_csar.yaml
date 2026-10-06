@@ -5,7 +5,7 @@ DEFAULT:
   enabled: true             # set to false here to make it opt-in per instance
   dynamic_campaign: false   # true on the dynamic campaign servers only: their
                             # rescues also feed jsh_csar_dynamic, the per-status
-                            # table awards are calculated from
+                            # breakdown table
 
   credits_log_event: csar   # value written to the event column of credits_log
   announce_in_game: true    # set false to let the credit system do the talking
@@ -31,23 +31,6 @@ DEFAULT:
     RedPilot: 150
     Unknown: 50
 
-  # Logbook awards granted automatically when a pilot crosses a threshold.
-  # Create the award first in Discord:
-  #   /award create name:"CSAR Wings" ribbon_colors:'["#0000FF", "#FFFFFF"]'
-  # pilot_status: any counts every rescue on every server (jsh_csar_totals);
-  # a specific status counts the dynamic campaign only (jsh_csar_dynamic).
-  # An award is granted once, with a citation, and shows in /logbook pilot
-  # and /award ribbon.
-  awards:
-    - award: CSAR Wings
-      pilot_status: any
-      rescues: 10
-    - award: Silver Lifeline
-      pilot_status: Critical
-      rescues: 25
-    - award: Interrogator's Medal
-      pilot_status: RedPilot
-      rescues: 15
 
 # ---------------------------------------------------------------- per instance
 # Turn the plugin off on servers that shouldn't use it:

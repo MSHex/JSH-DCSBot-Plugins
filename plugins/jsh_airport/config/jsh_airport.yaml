@@ -1,0 +1,21 @@
+# Copy to <bot>/config/plugins/jsh_airport.yaml on BOTH nodes.
+# DEFAULT applies to every server. A section named after an instance (the names
+# under "instances:" in nodes.yaml) overrides DEFAULT for that server only.
+DEFAULT:
+  enabled: true             # set to false here to make it opt-in per instance
+  # Warehouse contents come from your /airbase info Excel exports, one per level:
+  #   <warehouse_dir>/warehouse-lvl0.xlsx ... warehouse-lvl3.xlsx
+  # Every row in the sheet is applied, as an absolute count.
+  warehouse_dir: config/plugins/jsh_airport
+  warehouse_file: warehouse-lvl{level}.xlsx
+
+# ---------------------------------------------------------------- per instance
+# Turn the plugin off on servers that shouldn't use it:
+#
+# DedicatedServer:
+#   enabled: false
+#
+# Or point one server at different sheets:
+#
+# DCS.release_server:
+#   warehouse_dir: D:/dcs-shared/dynamic-campaign-levels

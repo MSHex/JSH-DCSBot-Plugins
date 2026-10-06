@@ -65,6 +65,16 @@ class CreditsEventListener(EventListener["Credits"]):
         return config.get('messages', {}).get(name, default)
 
     @staticmethod
+    def _partial_event(config: dict, why: str) -> str:
+        """
+        credits_log event for a sortie that ended badly, named after how it
+        ended -- 'ejected', 'crashed', 'died' -- so the log reads as what
+        happened rather than as bookkeeping.
+        """
+        mapping = config.get('partial_events') or {}
+        return mapping.get(why) or config.get('default_partial_event', 'salvaged')
+
+    @staticmethod
     def _new_bucket() -> dict[str, Any]:
         return {'points': 0, 'reasons': {}, 'detail': {}, 'rows': []}
 
@@ -147,26 +157,56 @@ class CreditsEventListener(EventListener["Credits"]):
                 points=points, total=total, reason=label))
 
     async def _drop(self, server: Server, ucid: str, why: str) -> None:
-        """Discard a pending bucket without paying it. Ledger rows stay unpaid."""
+        """
+        End a sortie that never made it home.
+
+        `death_payout` decides how much of the pending bucket the pilot keeps
+        anyway -- 0.25 leaves them a quarter of what they earned, 0 is the
+        all-or-nothing behaviour. The rest is gone.
+
+        Ledger rows stay unpaid either way: they were earned but never landed
+        with, so "earned vs collected" still measures what RTB collected. The
+        partial is its own credits_log row instead.
+        """
         key = self._key(server, ucid)
         async with self.lock:
             bucket = self.pending.pop(key, None)
         if not bucket or bucket['points'] <= 0:
             return
 
-        self.log.debug(f"JSH Credits: dropped {bucket['points']} pending for "
-                       f"{ucid} on {server.name} ({why})")
-
         config = self._config(server)
         if not config:
             return
-        message = self._message(config, 'lost')
-        if not message:
-            return
+
+        pending = bucket['points']
+        keep = float(config.get('death_payout', 0.25))
+        kept = int(round(pending * max(0.0, min(1.0, keep))
+                         * config.get('multiplier', 1.0))) if keep > 0 else 0
+
         player = cast(CreditPlayer, server.get_player(ucid=ucid))
-        if player:
+
+        if kept > 0 and player:
+            old_points = player.points
+            player.points += kept
+            detail = self._remark(bucket, config.get('remark_detail', 3))
+            remark = f"kept {kept} of {pending} pending after {why} ({detail})"
+            max_len = int(config.get('remark_max_length', 200))
+            if len(remark) > max_len:
+                remark = remark[:max_len - 3] + '...'
+            await player.audit(self._partial_event(config, why), old_points, remark)
+            self.log.info(f"JSH Credits: {player.name} kept {kept} of {pending} "
+                          f"pending on {server.name} ({why})")
+        else:
+            self.log.debug(f"JSH Credits: dropped {pending} pending for "
+                           f"{ucid} on {server.name} ({why})")
+
+        if not player:
+            return
+        name = 'salvaged' if kept > 0 else 'lost'
+        message = self._message(config, name)
+        if message:
             await player.sendUserMessage(message.format(
-                points=bucket['points'], reason=why))
+                points=pending, kept=kept, lost=pending - kept, reason=why))
 
     async def _drop_server(self, server: Server, why: str) -> None:
         """Discard every pending bucket on one server."""

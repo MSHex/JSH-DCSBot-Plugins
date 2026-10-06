@@ -1,8 +1,10 @@
 # Plugin "JSH Credits"
 
 Holds the credits a player earns for **kills** during a sortie and pays them out
-only when they land at a friendly airbase or FARP. They are dropped if the player
-crashes, ejects, dies, changes slot, disconnects, or the mission ends first.
+only when they land at a friendly airbase or FARP. A sortie that ends badly --
+crash, eject, pilot death, self-kill, disconnect or slot change -- pays out only
+`death_payout` of what was pending (a quarter by default); the rest is gone.
+A mission ending while the player is airborne drops the bucket entirely.
 
 Kills are all this plugin credits. Mission awards that arrive through
 `addUserPoints` -- CSAR rescues, logistics rewards -- are credited by CreditSystem
@@ -95,8 +97,8 @@ at that moment. Ships count as landing places, so carrier traps pay out.
 | `kill` | Hold points for killer and crew (no AI killers, self-kills or team-kills) |
 | `addUserPoints` | Clear the unused `deposit` CreditSystem writes; the award itself is not ours |
 | `jshCreditsLanding` | Pay out the pending bucket |
-| `crash`, `eject`, `pilot_death`, `self_kill` | Drop the bucket |
-| `disconnect`, `onPlayerChangeSlot` | Drop the bucket |
+| `crash`, `eject`, `pilot_death`, `self_kill` | Pay `death_payout` of the bucket, lose the rest |
+| `disconnect`, `onPlayerChangeSlot` | Pay `death_payout` of the bucket, lose the rest |
 | `mission_end`, `onMissionLoadEnd` | Drop all buckets on that server |
 
 ## Audit trail
@@ -114,6 +116,22 @@ RTB Al-Asad Airbase: kills (86: 5x SA-18 Igla manpad, 3x tt_ZU-23, 17x Infantry 
 `remark_detail` sets how many unit types are named before the `+N more` tail
 (0 disables the detail entirely). `remark_max_length` truncates the whole remark
 so Discord embeds stay readable.
+
+A sortie that ends badly with `death_payout` above 0 writes its own row, under an
+event named after how it ended:
+
+| Ending | `credits_log` event |
+| --- | --- |
+| eject | `ejected` |
+| crash | `crashed` |
+| pilot death, self-kill | `died` |
+| disconnect, slot change | `salvaged` |
+
+The remark names what it came from, e.g.
+`kept 22 of 86 pending after eject (kills (86: 5x SA-18 Igla manpad, +8 more))`.
+
+Nothing here ever deducts from a campaign balance -- this plugin only ever adds.
+The only thing at stake is the pending bucket from that sortie.
 
 Nothing is logged as paid until the balance has actually changed.
 
@@ -140,6 +158,12 @@ SELECT player_ucid,
 SELECT sum(points) FROM jsh_credits_events WHERE player_ucid = '...' AND paid;
 SELECT sum(new_points - old_points) FROM credits_log
  WHERE player_ucid = '...' AND event = 'rtb';
+
+-- partial payouts are deliberately NOT in that reconciliation: their ledger
+-- rows stay unpaid, because they were earned and never landed with
+SELECT sum(new_points - old_points) FROM credits_log
+ WHERE player_ucid = '...'
+   AND event IN ('ejected', 'crashed', 'died', 'salvaged');
 ```
 
 The ledger never blocks crediting: if a write fails it is logged as an error and

@@ -1,16 +1,36 @@
 # JSH DCSServerBot Plugins
 
-Three plugins for [DCSServerBot](https://github.com/Special-K-s-Flightsim-Bots/DCSServerBot),
+Plugins for [DCSServerBot](https://github.com/Special-K-s-Flightsim-Bots/DCSServerBot),
 written for the JSH servers and used in production there.
 
 | Plugin | What it does |
 | --- | --- |
 | [`jsh_credits`](plugins/jsh_credits/) | Holds kill credits until the pilot lands at a friendly airbase or FARP. Dropped on crash, eject, death, slot change or disconnect. |
 | [`jsh_csar`](plugins/jsh_csar/) | Pays credits for CSAR rescues and records them per pilot status. Supports Joker ADV_CSAR, Foothold, Ciribob CSAR and MOOSE Ops.CSAR. |
-| [`jsh_airport`](plugins/jsh_airport/) | GM commands to set an airbase, FARP or ship warehouse to a level (0-3) from Excel sheets, and track the level per airbase. |
+| [`jsh_airport`](plugins/jsh_airport/) | GM commands to set an airbase, FARP or ship warehouse to a level (0-3) from Excel sheets, apply battle damage, and track the level per airbase. |
+| [`hardcore`](plugins/hardcore/) | Hardcore mode and the flight economy: pays per flown block, with penalties for losses. |
+| [`awardautomation`](plugins/awardautomation/) | Grants Logbook medals automatically from campaign statistics, qualifications and Hardcore sessions. |
+| [`rankstatus`](plugins/rankstatus/) | `/pilot status` — rank, credits, promotion progress, combat record, airframes, awards. |
 
-They are independent — install any one of them on its own. Each has its own
-README with install steps, commands and configuration.
+Each plugin is independent and has its own README with install steps, commands
+and configuration. They do interact through credits, though — see below.
+
+## Who writes credits
+
+Credits live in CreditSystem's `credits` table, with every change recorded in
+`credits_log`. More than one plugin writes there, and the whole point of the
+arrangement is that no two of them ever pay for the same thing:
+
+| Writer | Pays for | `credits_log` event |
+| --- | --- | --- |
+| `jsh_credits` | kills, held until the pilot lands at a friendly base | `rtb` |
+| CreditSystem | mission-script awards via `addUserPoints`, relabelled by whoever earned them | `csar`, … |
+| `hardcore` | flight economy settlement, and the Hardcore buy-in | `flight economy`, `hardcore buy-in` |
+| `awardautomation` | medal rewards | its own ledger |
+
+`jsh_credits` deliberately stays out of every path but kills. If you add another
+credit source, give it its own event name and make sure nothing else pays the
+same event.
 
 ## Installation
 

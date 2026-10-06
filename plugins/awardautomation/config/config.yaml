@@ -1,0 +1,103 @@
+DEFAULT:
+  enabled: true
+  scan_interval_minutes: 1
+
+  # Stable database ID from the campaigns table. All rewards are paid into
+  # this campaign and campaign-scoped rules combine its assigned servers.
+  campaign_id: 1
+
+  # Hardcore exists only on this server. Air Achievement and Air Commendation
+  # always use this server and the campaign_id above.
+  hardcore:
+    server: DCS.dcs_serverrelease
+
+  # Safe default for a live server: pilots who already hold both qualifications
+  # are registered as locked without receiving a retroactive medal or payout.
+  # Change to true before the first start if existing holders should be rewarded.
+  bootstrap_existing: false
+
+  notify_pilot: true
+  # Optional Discord channel ID for public award announcements.
+  # notify_channel: 123456789012345678
+
+  rules:
+    combat_readiness:
+      enabled: true
+      # Stable Logbook database ID. The label is informational; the ID wins.
+      award_id: 26
+      award_name: Combat Readiness Medal
+      credits: 500
+
+      qualifications:
+        # Exact IDs from the logbook_qualifications table.
+        aar_ids:
+          - 15
+        ifr_ids:
+          - 16
+
+    # One-time campaign award: K/D must be strictly greater than 50 and the
+    # pilot must have at least 1,000 hours in the active campaign.
+    air_force_cross:
+      enabled: true
+      award_id: 12
+      award_name: Air Force Cross
+      credits: 4500
+      minimum_flight_hours: 1000
+      kd_ratio_over: 50.0
+      scope: campaign
+
+    # Recurring campaign award: one medal and payout for every complete 150
+    # hours flown in one of these exact statistics.slot aircraft types.
+    airmans_medal:
+      enabled: true
+      award_id: 14
+      award_name: Airman's Medal
+      credits: 2500
+      hours_per_award: 150
+      aircraft_types:
+        - C-130J-30
+        - Hercules
+        - CH-47Fbl1
+        - UH-1H
+        - Mi-8MT
+      scope: campaign
+
+    # One-time campaign award for the first 50 air-to-air kills. UserStats
+    # records these as plane kills plus helicopter kills.
+    aerial_achievement:
+      enabled: true
+      award_id: 17
+      award_name: Aerial Achievement Medal
+      credits: 1500
+      air_kills: 50
+      scope: server
+      server: DCS.dcs_serverrelease
+
+    # Optional: evaluated only when the standalone Hardcore plugin is loaded.
+    # A qualifying session must be settled, contain at least one completed
+    # reward block, start in Hardcore, and finish without Hardcore revocation.
+    air_achievement:
+      enabled: true
+      # ID 28 is Air Achievement Medal. ID 17 is the separate Aerial
+      # Achievement Medal and must not be used for this Hardcore rule.
+      award_id: 28
+      award_name: Air Achievement Medal
+      credits: 1000
+      sessions: 10
+
+    air_commendation:
+      enabled: true
+      award_id: 24
+      award_name: Air Commendation Medal
+      credits: 1500
+      sessions: 20
+
+    # Recurring campaign award: one medal and payout for every complete 500
+    # hours of total campaign flight time.
+    combat_action:
+      enabled: true
+      award_id: 18
+      award_name: Combat Action Medal
+      credits: 750
+      hours_per_award: 500
+      scope: campaign

@@ -1,0 +1,17 @@
+AwardAutomation verified build 1.6
+
+Implemented rule: Combat Readiness Medal
+Reward: 500 campaign credits (configurable)
+Reset: only when AAR and IFR are both invalid at the same scan
+Reconciliation: every minute by default plus manual admin scan
+Safety: atomic medal/credit transaction and unique pilot/rule/cycle ledger
+Dependencies: mission, creditsystem, logbook
+Qualification IDs: AAR = 15, IFR = 16
+Optional Hardcore integration: 10-session and 20-session consecutive streak medals
+Statistical awards: Air Force Cross, Airman's Medal, Aerial Achievement, Combat Action
+Recurring milestones: every 150 cargo hours and every 500 total campaign hours
+Award IDs: Combat Readiness = 26, Air Achievement = 28, Air Commendation = 24
+Additional award IDs: Air Force Cross = 12, Airman's = 14, Aerial Achievement = 17, Combat Action = 18
+Credit destination campaign ID: 1
+Campaign/server statistical scopes: configurable per statistical medal
+Hardcore scope: campaign ID 1 on DCS.dcs_serverrelease only

@@ -1,0 +1,147 @@
+schema;qualification_ids:
+  type: seq
+  nullable: false
+  sequence:
+    - {type: int, nullable: false, range: {min: 1}, unique: true}
+
+schema;aircraft_types:
+  type: seq
+  nullable: false
+  sequence:
+    - {type: str, nullable: false, range: {min: 1}, unique: true}
+
+schema;hardcore_settings:
+  type: map
+  nullable: false
+  mapping:
+    server: {type: str, nullable: false, required: true, range: {min: 1}}
+
+schema;combat_readiness_rule:
+  type: map
+  nullable: false
+  mapping:
+    enabled: {type: bool, nullable: false}
+    award_id: {type: int, nullable: false, range: {min: 1}}
+    award_name: {type: str, nullable: false, range: {min: 1}}
+    # Deprecated v1.3 compatibility fallback. New configurations use award_id.
+    award: {type: str, nullable: false, range: {min: 1}}
+    credits: {type: int, nullable: false, range: {min: 0}}
+    # Deprecated <= 1.5 compatibility field. Combat Readiness is campaign-wide.
+    server: {type: str, nullable: false, range: {min: 1}}
+    qualifications:
+      type: map
+      nullable: false
+      mapping:
+        aar_ids:
+          include: 'qualification_ids'
+        ifr_ids:
+          include: 'qualification_ids'
+
+schema;hardcore_rule:
+  type: map
+  nullable: false
+  mapping:
+    enabled: {type: bool, nullable: false}
+    award_id: {type: int, nullable: false, range: {min: 1}}
+    award_name: {type: str, nullable: false, range: {min: 1}}
+    # Deprecated v1.3 compatibility fallback. New configurations use award_id.
+    award: {type: str, nullable: false, range: {min: 1}}
+    credits: {type: int, nullable: false, range: {min: 0}}
+    sessions: {type: int, nullable: false, range: {min: 1}}
+    # Deprecated <= 1.5 compatibility field. The top-level Hardcore server wins.
+    server: {type: str, nullable: false, range: {min: 1}}
+
+schema;air_force_cross_rule:
+  type: map
+  nullable: false
+  mapping:
+    enabled: {type: bool, nullable: false}
+    award_id: {type: int, nullable: false, range: {min: 1}}
+    award_name: {type: str, nullable: false, range: {min: 1}}
+    award: {type: str, nullable: false, range: {min: 1}}
+    credits: {type: int, nullable: false, range: {min: 0}}
+    minimum_flight_hours: {type: int, nullable: false, range: {min: 1}}
+    kd_ratio_over: {type: float, nullable: false, range: {min: 0.0}}
+    scope: {type: str, nullable: false, enum: ['campaign', 'server']}
+    server: {type: str, nullable: false, range: {min: 1}}
+
+schema;airmans_medal_rule:
+  type: map
+  nullable: false
+  mapping:
+    enabled: {type: bool, nullable: false}
+    award_id: {type: int, nullable: false, range: {min: 1}}
+    award_name: {type: str, nullable: false, range: {min: 1}}
+    award: {type: str, nullable: false, range: {min: 1}}
+    credits: {type: int, nullable: false, range: {min: 0}}
+    hours_per_award: {type: int, nullable: false, range: {min: 1}}
+    aircraft_types:
+      include: 'aircraft_types'
+    scope: {type: str, nullable: false, enum: ['campaign', 'server']}
+    server: {type: str, nullable: false, range: {min: 1}}
+
+schema;aerial_achievement_rule:
+  type: map
+  nullable: false
+  mapping:
+    enabled: {type: bool, nullable: false}
+    award_id: {type: int, nullable: false, range: {min: 1}}
+    award_name: {type: str, nullable: false, range: {min: 1}}
+    award: {type: str, nullable: false, range: {min: 1}}
+    credits: {type: int, nullable: false, range: {min: 0}}
+    air_kills: {type: int, nullable: false, range: {min: 1}}
+    scope: {type: str, nullable: false, enum: ['campaign', 'server']}
+    server: {type: str, nullable: false, range: {min: 1}}
+
+schema;combat_action_rule:
+  type: map
+  nullable: false
+  mapping:
+    enabled: {type: bool, nullable: false}
+    award_id: {type: int, nullable: false, range: {min: 1}}
+    award_name: {type: str, nullable: false, range: {min: 1}}
+    award: {type: str, nullable: false, range: {min: 1}}
+    credits: {type: int, nullable: false, range: {min: 0}}
+    hours_per_award: {type: int, nullable: false, range: {min: 1}}
+    scope: {type: str, nullable: false, enum: ['campaign', 'server']}
+    server: {type: str, nullable: false, range: {min: 1}}
+
+schema;element_schema:
+  type: map
+  nullable: false
+  mapping:
+    enabled: {type: bool, nullable: false}
+    scan_interval_minutes: {type: int, nullable: false, range: {min: 1, max: 1440}}
+    campaign_id: {type: int, nullable: false, range: {min: 1}}
+    hardcore:
+      include: 'hardcore_settings'
+    bootstrap_existing: {type: bool, nullable: false}
+    notify_pilot: {type: bool, nullable: false}
+    notify_channel: {type: int, nullable: false}
+    rules:
+      type: map
+      nullable: false
+      mapping:
+        combat_readiness:
+          include: 'combat_readiness_rule'
+        air_force_cross:
+          include: 'air_force_cross_rule'
+        airmans_medal:
+          include: 'airmans_medal_rule'
+        aerial_achievement:
+          include: 'aerial_achievement_rule'
+        air_achievement:
+          include: 'hardcore_rule'
+        air_commendation:
+          include: 'hardcore_rule'
+        combat_action:
+          include: 'combat_action_rule'
+
+type: map
+func: check_main_structure
+nullable: false
+mapping:
+  DEFAULT:
+    include: 'element_schema'
+  commands:
+    include: 'commands_schema'

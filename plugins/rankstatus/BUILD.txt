@@ -1,0 +1,9 @@
+RankStatus verified build 1.4
+
+Discord command: /pilot status [user]
+UI: organized campaign, combat, profile, discipline, promotion, and awards sections
+Awards: Logbook award list plus generated ribbon rack image
+Campaign data: K/D, friendly kills, and top three airframes by completed flight time
+Profile data: squadron plus optional permission-aware Punishment and Hardcore information
+
+This build registers only the pilot command shown above.

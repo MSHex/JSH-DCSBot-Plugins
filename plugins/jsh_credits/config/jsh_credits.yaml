@@ -1,0 +1,44 @@
+# Copy to <bot>/config/plugins/jsh_credits.yaml on BOTH nodes.
+#
+# DEFAULT applies to every server. To override a key for one server, add a
+# section named after its INSTANCE (the Saved Games folder / the instance name
+# in nodes.yaml), not the server name from servers.yaml. This is the standard
+# DCSServerBot plugin layout, e.g. DCS.dcs_serverrelease.
+
+DEFAULT:
+  enabled: true         # set false in a server section to opt that server out
+  multiplier: 1.0       # applied once, at payout (Foothold x1, dynamic campaign x2)
+  remark_detail: 3      # how many unit types to name in the RTB remark (0 = none)
+  remark_max_length: 200  # remark is truncated past this, so embeds stay readable
+
+  messages:
+    # Leave a message empty or remove it to silence it.
+    held: 'Pending: +{points} ({reason}). Total pending {total} - land at a friendly base to collect.'
+    paid: 'Credits collected at {place}: +{points}. Balance {old_points} -> {new_points}.'
+    lost: 'You lost {points} pending credits ({reason}).'
+
+  # Evaluated top to bottom, first match wins, so order from most specific to
+  # least. A 'default' entry matches everything, so it must come last.
+  points_per_kill:
+  - category: Planes
+    type: Player
+    points: 20
+  - category: Planes
+    type: AI
+    points: 15
+  - category: Helicopters
+    points: 8
+  - category: Ships
+    points: 10
+  - category: Air Defence
+    points: 8
+  - default: 2
+
+# Example per-instance overrides -----------------------------------------------
+# Instance names, NOT server names. Check config/nodes.yaml for yours.
+#
+# DCS.dynamic_campaign:
+#   multiplier: 2.0
+#
+# DCS.dogfight:
+#   enabled: false

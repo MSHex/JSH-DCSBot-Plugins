@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS jsh_csar_rescues (
 CREATE INDEX IF NOT EXISTS idx_jsh_csar_rescues_ucid ON jsh_csar_rescues (player_ucid, rescued_at);
 
 -- Dynamic campaign only: totals per player and pilot status.
--- This is the table awards are calculated from.
+-- This is the per-status breakdown another plugin builds awards from.
 CREATE TABLE IF NOT EXISTS jsh_csar_dynamic (
     player_ucid TEXT NOT NULL,
     pilot_status TEXT NOT NULL,
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS jsh_csar_dynamic (
 );
 
 -- Every server and every CSAR script, dynamic campaign included: one row per
--- player. This is what the logbook reads for "pilots rescued".
+-- player. This is the "pilots rescued" figure for any plugin that wants it.
 CREATE TABLE IF NOT EXISTS jsh_csar_totals (
     player_ucid TEXT NOT NULL PRIMARY KEY,
     rescues INTEGER NOT NULL DEFAULT 0,

@@ -22,13 +22,7 @@ class Csar(Plugin[CsarEventListener]):
 
     def __init__(self, bot: DCSServerBot, eventlistener=None):
         super().__init__(bot, eventlistener)
-        self._logbook = None          # cached logbook award column names
         self._credits_log = None      # cached credits_log column names
-        self._awards_config: list = []  # filled per server in check_awards_for()
-
-    async def check_awards_for(self, server: Server, ucid: str) -> list[str]:
-        self._awards_config = self.get_config(server).get('awards', [])
-        return await self._check_awards(ucid)
 
     def enabled(self, server: Server) -> bool:
         """enabled: false in DEFAULT or in the server's instance section turns the plugin off there."""
@@ -117,12 +111,6 @@ class Csar(Plugin[CsarEventListener]):
                     )
                 """, params)
 
-    async def message(self, server: Server, name: str, text: str) -> None:
-        await server.send_to_dcs({
-            "command": "jshCsarRun",
-            "lua": f'if jsh_csar then jsh_csar.message({lua_str(name)}, {lua_str(text)}) end'
-        })
-
     async def record(self, server: Server, ucid: Optional[str], name: str, status: str,
                      rescues: int, points: int, reason: str, source: Optional[str]) -> None:
         """Writes the event row, the all-servers total, and the dynamic campaign breakdown."""
@@ -157,104 +145,6 @@ class Csar(Plugin[CsarEventListener]):
                             last_reason = EXCLUDED.last_reason,
                             last_rescue = now() AT TIME ZONE 'utc'
                     """, (ucid, status, rescues, points, reason))
-
-    # ------------------------------------------------------------ logbook awards
-    async def logbook_schema(self) -> Optional[dict]:
-        """Finds the logbook award columns once, so a schema change is a log line, not a crash."""
-        if self._logbook is not None:
-            return self._logbook or None
-        async with self.apool.connection() as conn:
-            cursor = await conn.execute("""
-                SELECT table_name, column_name FROM information_schema.columns
-                WHERE table_name IN ('logbook_awards', 'logbook_pilot_awards')
-            """)
-            rows = await cursor.fetchall()
-        cols: dict[str, set] = {'logbook_awards': set(), 'logbook_pilot_awards': set()}
-        for table, column in rows:
-            cols[table].add(column)
-        if not cols['logbook_awards'] or not cols['logbook_pilot_awards']:
-            self.log.warning("CSAR: logbook plugin tables not found, awards are disabled.")
-            self._logbook = {}
-            return None
-
-        def pick(table: str, *candidates: str) -> Optional[str]:
-            for c in candidates:
-                if c in cols[table]:
-                    return c
-            return None
-
-        schema = {
-            'award_id': pick('logbook_awards', 'id', 'award_id'),
-            'award_name': pick('logbook_awards', 'name', 'award_name', 'title'),
-            'grant_ucid': pick('logbook_pilot_awards', 'player_ucid', 'ucid'),
-            'grant_award': pick('logbook_pilot_awards', 'award_id', 'logbook_award_id', 'award'),
-            'grant_citation': pick('logbook_pilot_awards', 'citation', 'reason', 'note'),
-        }
-        if not all(schema[k] for k in ('award_id', 'award_name', 'grant_ucid', 'grant_award')):
-            self.log.warning(f"CSAR: unexpected logbook award schema {cols}, awards are disabled.")
-            self._logbook = {}
-            return None
-        self._logbook = schema
-        return schema
-
-    async def _check_awards(self, ucid: str) -> list[str]:
-        config_awards = self._awards_config
-        if not config_awards:
-            return []
-        schema = await self.logbook_schema()
-        if not schema:
-            return []
-
-        granted: list[str] = []
-        async with self.apool.connection() as conn:
-            cursor = await conn.execute(
-                "SELECT COALESCE(rescues, 0) FROM jsh_csar_totals WHERE player_ucid = %s", (ucid,))
-            row = await cursor.fetchone()
-            total = row[0] if row else 0
-            cursor = await conn.execute(
-                "SELECT pilot_status, rescues FROM jsh_csar_dynamic WHERE player_ucid = %s", (ucid,))
-            by_status = {r[0]: r[1] for r in await cursor.fetchall()}
-
-            for entry in config_awards:
-                name = entry.get('award')
-                needed = int(entry.get('rescues', 0))
-                status = entry.get('pilot_status', 'any')
-                if not name or needed <= 0:
-                    continue
-                have = total if status in (None, 'any', 'Any') else by_status.get(status, 0)
-                if have < needed:
-                    continue
-
-                cursor = await conn.execute(
-                    f"SELECT {schema['award_id']} FROM logbook_awards WHERE {schema['award_name']} = %s",
-                    (name,))
-                award = await cursor.fetchone()
-                if not award:
-                    self.log.warning(f"CSAR: award '{name}' does not exist, create it with /award create.")
-                    continue
-                cursor = await conn.execute(
-                    f"SELECT 1 FROM logbook_pilot_awards "
-                    f"WHERE {schema['grant_ucid']} = %s AND {schema['grant_award']} = %s",
-                    (ucid, award[0]))
-                if await cursor.fetchone():
-                    continue
-
-                label = "pilots" if status in (None, 'any', 'Any') else f"{status} pilots"
-                citation = f"{have} {label} rescued"
-                async with conn.transaction():
-                    if schema['grant_citation']:
-                        await conn.execute(
-                            f"INSERT INTO logbook_pilot_awards "
-                            f"({schema['grant_ucid']}, {schema['grant_award']}, {schema['grant_citation']}) "
-                            f"VALUES (%s, %s, %s)", (ucid, award[0], citation))
-                    else:
-                        await conn.execute(
-                            f"INSERT INTO logbook_pilot_awards "
-                            f"({schema['grant_ucid']}, {schema['grant_award']}) VALUES (%s, %s)",
-                            (ucid, award[0]))
-                granted.append(name)
-                self.log.info(f"CSAR: granted '{name}' to {ucid} ({citation})")
-        return granted
 
     async def get_ucid(self, member: discord.Member) -> Optional[str]:
         async with self.apool.connection() as conn:
@@ -332,40 +222,6 @@ class Csar(Plugin[CsarEventListener]):
         embed.add_field(name="Pilot", value="\n".join(r[0] for r in rows), inline=True)
         embed.add_field(name="Rescued", value="\n".join(str(r[1]) for r in rows), inline=True)
         await interaction.followup.send(embed=embed)
-
-    @csar.command(description='Show CSAR award progress')
-    @app_commands.guild_only()
-    async def awards(self, interaction: discord.Interaction, user: Optional[discord.Member] = None):
-        await interaction.response.defer(ephemeral=True)
-        member = user or interaction.user
-        ucid = await self.get_ucid(member)
-        if not ucid:
-            await interaction.followup.send(
-                f"{member.display_name} has no linked DCS account yet (/linkme).", ephemeral=True)
-            return
-        config_awards = self.get_config().get('awards', [])
-        if not config_awards:
-            await interaction.followup.send("No CSAR awards are configured.", ephemeral=True)
-            return
-        async with self.apool.connection() as conn:
-            cursor = await conn.execute(
-                "SELECT COALESCE(rescues, 0) FROM jsh_csar_totals WHERE player_ucid = %s", (ucid,))
-            row = await cursor.fetchone()
-            total = row[0] if row else 0
-            cursor = await conn.execute(
-                "SELECT pilot_status, rescues FROM jsh_csar_dynamic WHERE player_ucid = %s", (ucid,))
-            by_status = {r[0]: r[1] for r in await cursor.fetchall()}
-        lines = []
-        for entry in config_awards:
-            status = entry.get('pilot_status', 'any')
-            needed = int(entry.get('rescues', 0))
-            have = total if status in (None, 'any', 'Any') else by_status.get(status, 0)
-            mark = "✅" if have >= needed else "▫️"
-            scope = "" if status in (None, 'any', 'Any') else f" ({status})"
-            lines.append(f"{mark} {entry.get('award')}{scope}: {min(have, needed)}/{needed}")
-        embed = discord.Embed(title=f"CSAR awards – {member.display_name}",
-                              description="\n".join(lines), color=discord.Color.gold())
-        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @csar.command(description='Last CSAR rescues on a server')
     @app_commands.guild_only()

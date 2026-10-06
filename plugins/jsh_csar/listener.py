@@ -65,7 +65,3 @@ class CsarEventListener(EventListener["Csar"]):
             else:
                 what = parts[0]
             await self.plugin.pay(server, name, total, f"for rescuing {what}", ucid)
-
-        if ucid:
-            for award in await self.plugin.check_awards_for(server, ucid):
-                await self.plugin.message(server, name, f"Award earned: {award}")

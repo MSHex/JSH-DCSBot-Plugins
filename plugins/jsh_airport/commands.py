@@ -59,12 +59,13 @@ async def airbase_autocomplete(interaction: discord.Interaction, current: str) -
         levels = {r[0]: r[1] for r in await cursor.fetchall()}
 
     live = plugin.airbases.get(server.name)
+    problem = None
     if live is None:
         # First use on this mission: ask for the list, but don't let Discord time out.
         try:
-            live = await plugin.refresh_airbases(server, timeout=2)
-        except Exception:
-            live = []
+            live, problem = await plugin.refresh_airbases(server, timeout=2, explain=True)
+        except Exception as ex:
+            live, problem = [], str(ex)
 
     choices = []
     if live:
@@ -82,6 +83,13 @@ async def airbase_autocomplete(interaction: discord.Interaction, current: str) -
     else:
         choices = [app_commands.Choice(name=f"{n} (level {lvl})", value=n)
                    for n, lvl in sorted(levels.items()) if current.lower() in n.lower()]
+        if not choices:
+            # Nothing live and nothing stored: an empty dropdown with no reason is
+            # the worst outcome, so put the reason in front of the GM. Typing a
+            # name still works, and the command itself reports the real error.
+            why = problem or "no airbases returned by the mission"
+            choices = [app_commands.Choice(
+                name=f"[cannot read airbases: {why}]"[:100], value=current or "?")]
     return choices[:25]
 
 
@@ -128,12 +136,28 @@ class Airport(Plugin[AirportEventListener]):
         finally:
             self.pending.pop(request_id, None)
 
-    async def refresh_airbases(self, server: Server, timeout: int = 15) -> list:
-        """Asks the mission for its airbase list and caches it."""
+    async def refresh_airbases(self, server: Server, timeout: int = 15, explain: bool = False):
+        """
+        Asks the mission for its airbase list and caches it.
+
+        With explain=True returns (airbases, problem) so a caller can tell an
+        empty list caused by a failure from a mission that genuinely has none.
+        """
         result = await self.warehouse_request(server, "listAirbases", "", timeout=timeout)
-        if result.get('ok') and result.get('airbases') is not None:
+        problem = None
+        if result.get('ok') and result.get('airbases'):
             self.airbases[server.name] = result['airbases']
-        return self.airbases.get(server.name, [])
+            skipped = result.get('skipped') or 0
+            if skipped:
+                self.log.warning(f"Airport: {server.name} skipped {skipped} airbase(s) "
+                                 f"the mission could not describe")
+        elif not result.get('ok'):
+            problem = result.get('error') or "the mission did not reply"
+            self.log.warning(f"Airport: could not list airbases on {server.name}: {problem}")
+        else:
+            problem = "the mission reported no airbases"
+        bases = self.airbases.get(server.name, [])
+        return (bases, problem) if explain else bases
 
     # ------------------------------------------------------------ warehouse sheets
     def sheet_path(self, server: Server, level: int) -> str:
@@ -184,6 +208,18 @@ class Airport(Plugin[AirportEventListener]):
                     return {"ok": False, "error": result.get('error')}   # airbase missing, no reply, ...
                 failed.extend(result['failed'])
         return {"ok": True, "failed": failed}
+
+    async def damage_warehouse(self, server: Server, airbase: str, percent: int) -> dict:
+        """
+        Deducts `percent` of whatever is in the airbase warehouse right now.
+
+        Reads live quantities in the mission rather than a level sheet, so what
+        players have already used is accounted for: a base down to half a sheet
+        loses half of that half, not half of the sheet.
+        """
+        keep = max(0.0, 1.0 - percent / 100.0)
+        return await self.warehouse_request(
+            server, "damageWarehouse", f"{lua_str(airbase)}, {keep!r}")
 
     @staticmethod
     def failed_note(result: dict) -> str:
@@ -243,6 +279,53 @@ class Airport(Plugin[AirportEventListener]):
         await interaction.followup.send(
             f"{airbase} on {server.name}: {was} -> level {level.value}.{self.failed_note(result)}",
             ephemeral=True)
+
+    @airport_group.command(description='Deduct a percentage from an airbase warehouse (battle damage)')
+    @app_commands.guild_only()
+    @utils.app_has_roles(GM_ROLES)
+    @app_commands.autocomplete(airbase=airbase_autocomplete)
+    @app_commands.choices(percent=[
+        app_commands.Choice(name="25% - light damage", value=25),
+        app_commands.Choice(name="50% - heavy damage", value=50),
+        app_commands.Choice(name="75% - severe damage", value=75),
+        app_commands.Choice(name="100% - destroyed (sets level 0)", value=100),
+    ])
+    async def damage(self, interaction: discord.Interaction,
+                     server: app_commands.Transform[Server, utils.ServerTransformer(status=RUNNING)],
+                     airbase: str, percent: app_commands.Choice[int]):
+        await interaction.response.defer(ephemeral=True)
+        if await self.refuse_if_disabled(interaction, server):
+            return
+
+        result = await self.damage_warehouse(server, airbase, percent.value)
+        if not result.get('ok'):
+            await interaction.followup.send(
+                f"Warehouse damage failed: {result.get('error')}", ephemeral=True)
+            return
+
+        before, after = result.get('items_before', 0), result.get('items_after', 0)
+        fuel_before, fuel_after = result.get('fuel_before', 0), result.get('fuel_after', 0)
+
+        if before == 0 and fuel_before == 0:
+            await interaction.followup.send(
+                f"{airbase} on {server.name}: nothing to deduct - the warehouse is "
+                f"already empty, or set to unlimited in the mission editor.",
+                ephemeral=True)
+            return
+
+        lines = [f"{airbase} on {server.name}: {percent.value}% damage applied.",
+                 f"Items: {before:,} -> {after:,}",
+                 f"Liquids: {fuel_before:,} -> {fuel_after:,}"]
+
+        # 100% means the base can no longer spawn anything, so its level is 0.
+        if percent.value == 100:
+            current = await self.get_level(server, airbase)
+            await self.set_level(server, airbase, 0, interaction.user.display_name)
+            was = "unset" if current is None else f"level {current}"
+            lines.append(f"Level: {was} -> 0 (destroyed).")
+
+        await interaction.followup.send(
+            "\n".join(lines) + self.failed_note(result), ephemeral=True)
 
     @airport_group.command(description='Show airbase levels on a server')
     @app_commands.guild_only()

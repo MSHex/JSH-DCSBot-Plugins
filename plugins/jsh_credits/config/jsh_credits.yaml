@@ -27,10 +27,20 @@ DEFAULT:
   # The multiplier applies to what is kept, as it does at payout.
   death_payout: 0.25
 
-  # credits_log event for that partial payment. Keep it distinct from 'rtb' so
+  # credits_log event for that partial payment, named after how the sortie
+  # ended, so the log reads as what happened. Keep these distinct from 'rtb' so
   # the two can be told apart, and so the earned-vs-collected reconciliation in
   # the README keeps measuring landings only.
-  partial_event: salvage
+  partial_events:
+    eject: ejected
+    crash: crashed
+    pilot_death: died
+    self_kill: died
+    disconnect: salvaged
+    slot change: salvaged
+
+  # Used for any ending not listed above.
+  default_partial_event: salvaged
 
   # ------------------------------------------------------------------ messages
   #

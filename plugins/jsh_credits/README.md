@@ -117,9 +117,21 @@ RTB Al-Asad Airbase: kills (86: 5x SA-18 Igla manpad, 3x tt_ZU-23, 17x Infantry 
 (0 disables the detail entirely). `remark_max_length` truncates the whole remark
 so Discord embeds stay readable.
 
-A sortie that ends badly with `death_payout` above 0 writes its own row under
-`partial_event` (default `salvage`), reading e.g.
-`eject: kept 22 of 86 pending (kills (86: 5x SA-18 Igla manpad, +8 more))`.
+A sortie that ends badly with `death_payout` above 0 writes its own row, under an
+event named after how it ended:
+
+| Ending | `credits_log` event |
+| --- | --- |
+| eject | `ejected` |
+| crash | `crashed` |
+| pilot death, self-kill | `died` |
+| disconnect, slot change | `salvaged` |
+
+The remark names what it came from, e.g.
+`kept 22 of 86 pending after eject (kills (86: 5x SA-18 Igla manpad, +8 more))`.
+
+Nothing here ever deducts from a campaign balance -- this plugin only ever adds.
+The only thing at stake is the pending bucket from that sortie.
 
 Nothing is logged as paid until the balance has actually changed.
 
@@ -150,7 +162,8 @@ SELECT sum(new_points - old_points) FROM credits_log
 -- partial payouts are deliberately NOT in that reconciliation: their ledger
 -- rows stay unpaid, because they were earned and never landed with
 SELECT sum(new_points - old_points) FROM credits_log
- WHERE player_ucid = '...' AND event = 'salvage';
+ WHERE player_ucid = '...'
+   AND event IN ('ejected', 'crashed', 'died', 'salvaged');
 ```
 
 The ledger never blocks crediting: if a write fails it is logged as an error and

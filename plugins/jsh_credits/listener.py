@@ -65,6 +65,16 @@ class CreditsEventListener(EventListener["Credits"]):
         return config.get('messages', {}).get(name, default)
 
     @staticmethod
+    def _partial_event(config: dict, why: str) -> str:
+        """
+        credits_log event for a sortie that ended badly, named after how it
+        ended -- 'ejected', 'crashed', 'died' -- so the log reads as what
+        happened rather than as bookkeeping.
+        """
+        mapping = config.get('partial_events') or {}
+        return mapping.get(why) or config.get('default_partial_event', 'salvaged')
+
+    @staticmethod
     def _new_bucket() -> dict[str, Any]:
         return {'points': 0, 'reasons': {}, 'detail': {}, 'rows': []}
 
@@ -179,11 +189,11 @@ class CreditsEventListener(EventListener["Credits"]):
             old_points = player.points
             player.points += kept
             detail = self._remark(bucket, config.get('remark_detail', 3))
-            remark = f"{why}: kept {kept} of {pending} pending ({detail})"
+            remark = f"kept {kept} of {pending} pending after {why} ({detail})"
             max_len = int(config.get('remark_max_length', 200))
             if len(remark) > max_len:
                 remark = remark[:max_len - 3] + '...'
-            await player.audit(config.get('partial_event', 'salvage'), old_points, remark)
+            await player.audit(self._partial_event(config, why), old_points, remark)
             self.log.info(f"JSH Credits: {player.name} kept {kept} of {pending} "
                           f"pending on {server.name} ({why})")
         else:

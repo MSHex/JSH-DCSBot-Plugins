@@ -28,6 +28,7 @@ function JR.set(levels, names)
   for _ in pairs(JR.levels) do n = n + 1 end
   log("received " .. n .. " rank(s)")
   JR.attach()
+  JR.attachNames()
 end
 
 function JR.attach()
@@ -45,25 +46,39 @@ function JR.attach()
   end
   JR.originalGetPlayerRank = originalRank
 
-  -- Optional: show our rank names where Foothold would print its own. Several
-  -- Discord ranks map onto one Foothold level, so this names the band, not the
-  -- pilot's exact rank -- left off unless level_names is configured.
-  if next(JR.names or {}) and type(BattleCommander.getRankName) == "function" then
-    local originalName = BattleCommander.getRankName
-    BattleCommander.getRankName = function(self, idx, ...)
-      local name = idx and JR.names[tostring(idx)]
-      if name then return name end
-      return originalName(self, idx, ...)
-    end
-    JR.originalGetRankName = originalName
-  end
-
   JR.attached = true
   log("attached to BattleCommander")
+end
+
+-- Optional: show our rank names where Foothold would print its own. Several
+-- Discord ranks map onto one Foothold level, so this names the band, not the
+-- pilot's exact rank -- left off unless level_names is configured.
+--
+-- Separate from attach() and retried on every set(), because the first push
+-- after a mission start usually carries no names at all (nobody is connected
+-- yet). Folding it into attach() meant that first empty push latched
+-- JR.attached and the names never went on for the life of the mission.
+function JR.attachNames()
+  if JR.namesAttached then return end
+  if not next(JR.names or {}) then return end
+  if type(BattleCommander) ~= "table" or type(BattleCommander.getRankName) ~= "function" then
+    return
+  end
+
+  local originalName = BattleCommander.getRankName
+  BattleCommander.getRankName = function(self, idx, ...)
+    local name = idx and JR.names[tostring(idx)]
+    if name then return name end
+    return originalName(self, idx, ...)
+  end
+  JR.originalGetRankName = originalName
+  JR.namesAttached = true
+  log("rank names attached")
 end
 
 -- The bot normally calls set() straight after loading this file, but attach
 -- anyway in case Foothold finishes initialising first.
 pcall(JR.attach)
+pcall(JR.attachNames)
 
 log("loaded")

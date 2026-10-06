@@ -6,7 +6,7 @@ from core import Plugin, Group, utils, Server, Status
 from discord import app_commands
 from psycopg.rows import dict_row
 from services.bot import DCSServerBot
-from typing import Optional, Type, TEventListener
+from typing import Optional
 
 from .listener import RanksEventListener
 
@@ -49,7 +49,7 @@ class Ranks(Plugin[RanksEventListener]):
     shop, tankers, carrier navigation, menus -- follows.
     """
 
-    def __init__(self, bot: DCSServerBot, eventlistener: Type[TEventListener] = None):
+    def __init__(self, bot: DCSServerBot, eventlistener=None):
         super().__init__(bot, eventlistener)
 
     def enabled(self, server: Server) -> bool:

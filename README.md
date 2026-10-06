@@ -18,7 +18,7 @@ and configuration. They do interact through credits, though — see below.
 
 ## Who writes credits
 
-Credits live in CreditSystem's `credits` table, with every change recorded in
+Credits live in [CreditSystem](https://github.com/Special-K-s-Flightsim-Bots/DCSServerBot/blob/master/plugins/creditsystem/README.md)'s `credits` table, with every change recorded in
 `credits_log`. More than one plugin writes there, and the whole point of the
 arrangement is that no two of them ever pay for the same thing:
 
@@ -95,7 +95,7 @@ staying out of every other credit path.
 
 - DCSServerBot 3.x
 - PostgreSQL (each plugin creates its own tables on first load)
-- `jsh_credits` and `jsh_csar` require the CreditSystem plugin
+- `jsh_credits` and `jsh_csar` require the [CreditSystem](https://github.com/Special-K-s-Flightsim-Bots/DCSServerBot/blob/master/plugins/creditsystem/README.md) plugin
 - `jsh_airport` needs the level sheets in `config/plugins/jsh_airport/`
 
 Nothing here grants awards or medals: `jsh_csar`'s tables
@@ -126,6 +126,21 @@ the row to a valid two-part version instead of deleting it.
 Live configs — real UCIDs, Discord role names, channel IDs, tokens — must never
 be committed. The YAML files in each plugin's `config/` are samples with
 placeholder instance names; keep them that way.
+
+## Credits
+
+These plugins are built on
+[DCSServerBot](https://github.com/Special-K-s-Flightsim-Bots/DCSServerBot) by
+**Special-K**, and would not exist without it. The plugin API, the
+[CreditSystem](https://github.com/Special-K-s-Flightsim-Bots/DCSServerBot/blob/master/plugins/creditsystem/README.md)
+ledger they all write to, and the mission-side plumbing they hook into are his
+work.
+
+Several of these plugins integrate with
+[Leka's Foothold](https://github.com/leka1986/Lekas-Foothold) by **leka1986** --
+`jsh_csar` reads its rescue and enemy-pilot-capture stats, `jsh_ranks` replaces
+its rank gates, and `jsh_airport` drives the airbase warehouses behind it.
+Thanks also to the Joker ADV_CSAR author, whose script `jsh_csar` also supports.
 
 ## License
 

@@ -104,18 +104,26 @@ local function footholdActive()
   return type(BattleCommander) == "table"
 end
 
--- Foothold banks "Pilot Rescue" when the player lands at a friendly base.
+-- Foothold banks temp stats when the player lands at a friendly base, so both
+-- counters below are already landing-gated by Foothold itself.
+--   'Pilot Rescue'        -- friendly pilots recovered, reported as Unknown
+--                            because Foothold carries no pilot condition
+--   'Enemy Pilot Capture' -- red pilots delivered, reported as RedPilot
 local function attachFoothold()
   local original = BattleCommander.commitTempStats
   BattleCommander.commitTempStats = function(self, playerName, ...)
-    local rescued = 0
+    local rescued, captured = 0, 0
     pcall(function()
       local stats = self.tempStats and self.tempStats[playerName]
       rescued = tonumber(stats and stats['Pilot Rescue']) or 0
+      captured = tonumber(stats and stats['Enemy Pilot Capture']) or 0
     end)
     local results = { original(self, playerName, ...) }
-    if rescued > 0 then
-      pcall(CS.report, playerName, { Unknown = rescued }, "foothold")
+    local counts = {}
+    if rescued > 0 then counts.Unknown = rescued end
+    if captured > 0 then counts.RedPilot = captured end
+    if next(counts) then
+      pcall(CS.report, playerName, counts, "foothold")
     end
     return unpack(results)
   end

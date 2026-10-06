@@ -21,9 +21,11 @@ DEFAULT:
 
   # Credits per rescued pilot, by pilot status. Rescues are always recorded in
   # the database, even where the reward is 0.
-  # Healthy / Wounded / Critical / RedPilot come from the Joker ADV_CSAR script.
-  # Unknown is used by CSAR scripts that report no status
-  # (Foothold, Ciribob CSAR, MOOSE Ops.CSAR).
+  # Healthy / Wounded / Critical come from the Joker ADV_CSAR script.
+  # RedPilot is a captured enemy pilot: ADV_CSAR, or a Foothold "Enemy Pilot
+  # Capture" delivery.
+  # Unknown is used by CSAR scripts that report no pilot condition
+  # (Foothold friendly rescues, Ciribob CSAR, MOOSE Ops.CSAR).
   rewards:
     Healthy: 50
     Wounded: 75

@@ -18,7 +18,7 @@ player has rescued, by pilot status.
 | Script | Pilot status reported |
 |---|---|
 | Joker ADV_CSAR | Healthy, Wounded, Critical, RedPilot (captured enemy) |
-| Foothold | Unknown |
+| Foothold | Unknown (friendly rescues), RedPilot (enemy pilots delivered) |
 | Ciribob CSAR | Unknown |
 | MOOSE Ops.CSAR | Unknown |
 

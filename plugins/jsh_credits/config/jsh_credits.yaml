@@ -21,6 +21,17 @@ DEFAULT:
   # landing. Affects kills only -- this plugin credits nothing else.
   multiplier: 1.0
 
+  # How much of the pending bucket a pilot keeps when the sortie ends badly --
+  # crash, eject, pilot death, self-kill, disconnect or slot change. 0.25 leaves
+  # them a quarter of what they earned; 0 is all-or-nothing. The rest is gone.
+  # The multiplier applies to what is kept, as it does at payout.
+  death_payout: 0.25
+
+  # credits_log event for that partial payment. Keep it distinct from 'rtb' so
+  # the two can be told apart, and so the earned-vs-collected reconciliation in
+  # the README keeps measuring landings only.
+  partial_event: salvage
+
   # ------------------------------------------------------------------ messages
   #
   # Sent to the player in-game. Remove a key, or set it to '', to silence that
@@ -32,15 +43,20 @@ DEFAULT:
   #   paid   {points}  paid, after multiplier    {place}  where they landed
   #          {old_points} / {new_points}  balance either side
   #          {reason}  the same detail written to the credits_log remark
-  #   lost   {points}  thrown away      {reason}  why (see below)
+  #   lost   {points}  pending at the time  {kept} 0  {lost} all of it
+  #          {reason}  why (see below)
+  #   salvaged  sent instead of `lost` when death_payout > 0
+  #          {points}  pending at the time  {kept}  credited  {lost}  gone
+  #          {reason}  why (see below)
   #
-  # {reason} in `lost` is one of: crash, eject, pilot_death, self_kill,
-  # disconnect, slot change.
+  # {reason} in `lost` and `salvaged` is one of: crash, eject, pilot_death,
+  # self_kill, disconnect, slot change.
 
   messages:
     held: 'Pending: +{points} ({reason}). Total pending {total} - land at a friendly base to collect.'
     paid: 'Credits collected at {place}: +{points}. Balance {old_points} -> {new_points}.'
     lost: 'You lost {points} pending credits ({reason}).'
+    salvaged: 'You went down with {points} pending ({reason}). {kept} recovered, {lost} lost.'
 
   # ----------------------------------------------------- credits_log remark
   #

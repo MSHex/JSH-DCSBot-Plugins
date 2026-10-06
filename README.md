@@ -11,6 +11,7 @@ written for the JSH servers and used in production there.
 | [`hardcore`](plugins/hardcore/) | Hardcore mode and the flight economy: pays per flown block, with penalties for losses. |
 | [`awardautomation`](plugins/awardautomation/) | Grants Logbook medals automatically from campaign statistics, qualifications and Hardcore sessions. |
 | [`rankstatus`](plugins/rankstatus/) | `/pilot status` — rank, credits, promotion progress, combat record, airframes, awards. |
+| [`jsh_ranks`](plugins/jsh_ranks/) | Makes a Foothold mission enforce the Discord rank ladder instead of its own in-mission rank credits. |
 
 Each plugin is independent and has its own README with install steps, commands
 and configuration. They do interact through credits, though — see below.

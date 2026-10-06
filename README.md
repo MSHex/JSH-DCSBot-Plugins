@@ -108,6 +108,19 @@ Each plugin's `version.py` is the source of truth and is printed by the bot at
 startup, so a running bot's log identifies exactly what is deployed. Bump it with
 every behavioural change.
 
+**Two components only — `MAJOR.MINOR`.** DCSServerBot's migration path in
+`core/plugin.py` does `ver, rev = installed.split('.')`, so a three-part version
+like `1.0.2` raises `too many values to unpack (expected 2)` and the plugin fails
+to load. The version is also written to the `plugins` table on first install, so
+a bad value there keeps breaking later versions until the row is corrected:
+
+```sql
+DELETE FROM plugins WHERE plugin = '<plugin_name>';
+```
+
+That is safe for a plugin with no `db/tables.sql`; for one that owns tables, set
+the row to a valid two-part version instead of deleting it.
+
 ## Contributing
 
 Live configs — real UCIDs, Discord role names, channel IDs, tokens — must never

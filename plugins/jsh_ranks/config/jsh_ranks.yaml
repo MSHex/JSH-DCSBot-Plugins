@@ -1,0 +1,59 @@
+# Copy to <bot>/config/plugins/jsh_ranks.yaml on BOTH nodes.
+#
+# DEFAULT applies to every server. A section named after an instance (the names
+# under "instances:" in nodes.yaml) overrides DEFAULT for that server only.
+#
+# This plugin only does anything on a Foothold mission, and only matters when
+# RankingSystem = true in Foothold_Config.lua -- with it false, Foothold applies
+# no rank gates at all and there is nothing for these levels to govern.
+
+DEFAULT:
+  enabled: false            # opt in per instance; see the example at the bottom
+
+  # How often to re-send ranks while people are flying, in minutes. Credits and
+  # playtime both move during a session, so a pilot can earn a promotion
+  # mid-flight. 0 disables the refresh and ranks update only on connect and
+  # slot change.
+  refresh_minutes: 10
+
+  # Used for a pilot with no rank yet, and for any rank missing from rank_map.
+  default_level: 1
+
+  # The Discord ladder in creditsystem.yaml has 16 rungs; Foothold's
+  # ShopRankRequirements only goes to 7. This maps one onto the other.
+  # Keys are the achievement's `role` in creditsystem.yaml, exactly as written.
+  rank_map:
+    Airman Basic (E-1): 1
+    Airman (E-2): 1
+    Airman First Class (E-3): 1
+    Senior Airman (E-4): 1
+    Staff Sergeant (E-5): 2
+    Technical Sergeant (E-6): 2
+    Master Sergeant (E-7): 3
+    Senior Master Sergeant (E-8): 3
+    Chief Master Sergeant (E-9): 4
+    Command Chief Master Sergeant (E-9S): 4
+    Second Lieutenant (O-1): 5
+    First Lieutenant (O-2): 5
+    Captain (O-3): 6
+    Major (O-4): 6
+    Lieutenant Colonel (O-5): 7
+    Colonel (O-6): 7
+
+  # Optional. Names shown where Foothold would print its own rank name. Several
+  # Discord ranks share one level, so these name the band rather than the
+  # pilot's exact rank. Leave it out to keep Foothold's names.
+  # level_names:
+  #   '1': Enlisted
+  #   '2': NCO
+  #   '3': Senior NCO
+  #   '4': Chief
+  #   '5': Junior Officer
+  #   '6': Field Officer
+  #   '7': Senior Officer
+
+# ---------------------------------------------------------------- per instance
+# Turn it on only for the Foothold servers:
+#
+# DCS.Foothold:
+#   enabled: true

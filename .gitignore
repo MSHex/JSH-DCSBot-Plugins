@@ -1,0 +1,32 @@
+# Live bot configuration -- never commit. Real UCIDs, Discord role names,
+# channel IDs and tokens live here. The samples in plugins/*/config/ are the
+# only configs that belong in this repo.
+config/plugins/
+config/main.yaml
+config/nodes.yaml
+config/servers.yaml
+config/services/
+*.token
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local scratch
+*.log
+*.bak
+scratch/
+
+# Excel lock files
+~$*.xlsx

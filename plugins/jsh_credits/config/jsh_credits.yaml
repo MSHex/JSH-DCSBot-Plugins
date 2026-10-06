@@ -1,0 +1,104 @@
+# Copy to <bot>/config/plugins/jsh_credits.yaml on BOTH nodes.
+#
+# DEFAULT applies to every server. To override a key for one server, add a
+# section named after its INSTANCE (the names under "instances:" in nodes.yaml),
+# not the server name from servers.yaml. An instance section only needs the keys
+# it changes; everything else falls back to DEFAULT.
+#
+# Before deploying, see the repository README for the CreditSystem settings this
+# plugin depends on: points_per_kill removed, points_on_rtb: false,
+# multiplier: 1.0, and SlotBlocking payback off. Getting those wrong produces no
+# error anywhere, just wrong balances.
+
+DEFAULT:
+
+  # ----------------------------------------------------------------- behaviour
+
+  # false disables the plugin on a server: no holding, no payout, no ledger rows.
+  enabled: true
+
+  # Applied once, to the whole pending bucket, at payout. 2.0 pays double for
+  # landing. Affects kills only -- this plugin credits nothing else.
+  multiplier: 1.0
+
+  # ------------------------------------------------------------------ messages
+  #
+  # Sent to the player in-game. Remove a key, or set it to '', to silence that
+  # message. Each supports only the placeholders listed; an unknown one in your
+  # text raises a KeyError and the message is lost.
+  #
+  #   held   {points}  this award       {total}  pending after it
+  #          {reason}  always "kills"
+  #   paid   {points}  paid, after multiplier    {place}  where they landed
+  #          {old_points} / {new_points}  balance either side
+  #          {reason}  the same detail written to the credits_log remark
+  #   lost   {points}  thrown away      {reason}  why (see below)
+  #
+  # {reason} in `lost` is one of: crash, eject, pilot_death, self_kill,
+  # disconnect, slot change.
+
+  messages:
+    held: 'Pending: +{points} ({reason}). Total pending {total} - land at a friendly base to collect.'
+    paid: 'Credits collected at {place}: +{points}. Balance {old_points} -> {new_points}.'
+    lost: 'You lost {points} pending credits ({reason}).'
+
+  # ----------------------------------------------------- credits_log remark
+  #
+  # The payout writes one 'rtb' row per landing, with a remark like:
+  #   RTB Al-Asad Airbase: kills (86: 5x SA-18 Igla manpad, 3x tt_ZU-23, +8 more)
+
+  # How many unit types to name before the "+N more" tail. 0 drops the detail
+  # and leaves just the total: kills (86).
+  remark_detail: 3
+
+  # The remark is truncated past this many characters, so Discord embeds stay
+  # readable. The column itself is TEXT and has no limit.
+  remark_max_length: 200
+
+  # -------------------------------------------------------------- kill scoring
+  #
+  # Evaluated top to bottom; the FIRST entry that matches wins. Order from most
+  # specific to least, and put `default` last -- it matches everything, so any
+  # entry below it is dead.
+  #
+  # Keys an entry may use, all of which must match for the entry to win:
+  #   category    the victim's category, as the kill event reports it
+  #   type        Player or AI -- whether the victim was a human player
+  #   unit_type   exact DCS unit type name, e.g. SA-18 Igla manpad
+  #   points      what to award when the entry matches
+  #   default     shorthand for "match anything, award this"
+  #
+  # If every kill scores the default, your server's kill events are not
+  # reporting a category: run the bot at DEBUG and look at a kill event, then
+  # match on unit_type instead.
+
+  points_per_kill:
+  - category: Planes
+    type: Player
+    points: 20
+  - category: Planes
+    type: AI
+    points: 15
+  - category: Helicopters
+    points: 8
+  - category: Ships
+    points: 10
+  - category: Air Defence
+    points: 8
+  # An exact unit type, for a specific high-value target:
+  # - unit_type: S-300PS 64H6E sr
+  #   points: 25
+  - default: 2
+
+# ------------------------------------------------------------- per instance
+# Instance names, NOT server names. Check config/nodes.yaml for yours.
+#
+# Turn the plugin off on a server that shouldn't use it:
+#
+# DedicatedServer:
+#   enabled: false
+#
+# Or pay double for landing on one server (only the keys you list change):
+#
+# DCS.release_server:
+#   multiplier: 2.0

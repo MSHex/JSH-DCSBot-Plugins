@@ -1,12 +1,14 @@
 # Plugin "JSH Credits"
 
-Holds every credit a player earns during a sortie and pays it out only when they
-land at a friendly airbase or FARP. Points are dropped if the player crashes,
-ejects, dies, changes slot, disconnects, or the mission ends first.
+Holds the credits a player earns for **kills** during a sortie and pays them out
+only when they land at a friendly airbase or FARP. They are dropped if the player
+crashes, ejects, dies, changes slot, disconnects, or the mission ends first.
 
-This plugin becomes the **only** thing that writes credits. CreditSystem remains
-the ledger: balances, `credits_log`, achievements, Discord roles, `/credits info`
-and `-credits` all keep working unchanged.
+Kills are all this plugin credits. Mission awards that arrive through
+`addUserPoints` -- CSAR rescues, logistics rewards -- are credited by CreditSystem
+and labelled by the plugin that earned them, so each keeps its own `credits_log`
+event. CreditSystem remains the ledger: balances, `credits_log`, achievements,
+Discord roles, `/credits info` and `-credits` all keep working unchanged.
 
 ## Why it exists
 
@@ -16,7 +18,7 @@ does not do what its name suggests:
 - `points_on_rtb` is only checked in the `addUserPoints` handler. Kill points are
   credited immediately regardless, **and** copied into `deposit`, so a player who
   landed was paid for the same kills twice.
-- `addUserPoints` awards (CSAR, flight economy) went into `deposit` with no audit
+- `addUserPoints` awards (CSAR, logistics) went into `deposit` with no audit
   row, and were silently discarded whenever the deposit was cleared by a death or
   slot change. They were never credited at all.
 
@@ -28,14 +30,17 @@ attribute. This plugin has one writer and its own private pending store.
 | Setting | File | Value |
 | --- | --- | --- |
 | `payback` | `slotblocking.yaml` | `false` (or don't load SlotBlocking at all) |
-| `points_on_rtb` | `creditsystem.yaml` | `true` |
+| `points_on_rtb` | `creditsystem.yaml` | `false` |
 | `points_per_kill` | `creditsystem.yaml` | **removed** |
 | `multiplier` | `creditsystem.yaml` | `1.0` |
 
 Removing `points_per_kill` makes CreditSystem's kill handler a no-op (`ppk` is 0),
-so this plugin becomes the only source of kill points. Keeping `points_on_rtb: true`
-stops CreditSystem crediting mission awards on the spot; this plugin zeroes the
-resulting `deposit` so players never see a phantom "on deposit" figure.
+so this plugin is the only source of kill points. `points_on_rtb: false` lets
+CreditSystem credit mission awards as they arrive, which is what CSAR and
+logistics rewards need -- holding those to the next landing destroys them, since
+they are earned at a friendly field already and the landing has happened by the
+time the award arrives. This plugin zeroes the `deposit` CreditSystem writes
+alongside each award, so players never see a phantom "on deposit" figure.
 
 A campaign must be running on the server (see the GameMaster plugin), or no
 credits are awarded by anything.
@@ -88,7 +93,7 @@ at that moment. Ships count as landing places, so carrier traps pay out.
 | Event | Effect |
 | --- | --- |
 | `kill` | Hold points for killer and crew (no AI killers, self-kills or team-kills) |
-| `addUserPoints` | Hold positive awards; apply negative ones immediately |
+| `addUserPoints` | Clear the unused `deposit` CreditSystem writes; the award itself is not ours |
 | `jshCreditsLanding` | Pay out the pending bucket |
 | `crash`, `eject`, `pilot_death`, `self_kill` | Drop the bucket |
 | `disconnect`, `onPlayerChangeSlot` | Drop the bucket |
@@ -103,7 +108,7 @@ Two records are kept, for two different jobs.
 One `rtb` row per landing, with a remark naming what the points were for:
 
 ```
-RTB Al-Asad Airbase: kills (86: 5x SA-18 Igla manpad, 3x tt_ZU-23, 17x Infantry AK, +8 more), CSAR: 5x Unknown (20)
+RTB Al-Asad Airbase: kills (86: 5x SA-18 Igla manpad, 3x tt_ZU-23, 17x Infantry AK, +8 more)
 ```
 
 `remark_detail` sets how many unit types are named before the `+N more` tail

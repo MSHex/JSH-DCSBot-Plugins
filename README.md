@@ -7,7 +7,7 @@ written for the JSH servers and used in production there.
 | --- | --- |
 | [`jsh_credits`](plugins/jsh_credits/) | Holds kill credits until the pilot lands at a friendly airbase or FARP. Dropped on crash, eject, death, slot change or disconnect. |
 | [`jsh_csar`](plugins/jsh_csar/) | Pays credits for CSAR rescues and records them per pilot status. Supports Joker ADV_CSAR, Foothold, Ciribob CSAR and MOOSE Ops.CSAR. |
-| [`jsh_airport`](plugins/jsh_airport/) | GM commands to set an airbase, FARP or ship warehouse to a level (0-3) from Excel sheets, apply battle damage, and track the level per airbase. |
+| [`jsh_airport`](plugins/jsh_airport/) | GM commands to set an airbase, FARP or ship warehouse to a level (0-3) from Excel sheets, apply battle damage, and track the level per airbase. Airbases are picked by name or ICAO. |
 | [`hardcore`](plugins/hardcore/) | Hardcore mode and the flight economy: pays per flown block, with penalties for losses. |
 | [`awardautomation`](plugins/awardautomation/) | Grants Logbook medals automatically from campaign statistics, qualifications and Hardcore sessions. |
 | [`rankstatus`](plugins/rankstatus/) | `/pilot status` — rank, credits, promotion progress, combat record, airframes, awards. |

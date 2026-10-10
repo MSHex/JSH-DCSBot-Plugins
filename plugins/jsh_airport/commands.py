@@ -1,6 +1,7 @@
 import asyncio
 import discord
 import os
+import re
 import uuid
 
 from openpyxl import load_workbook
@@ -14,6 +15,22 @@ from .listener import AirportEventListener
 
 RUNNING = [Status.RUNNING, Status.PAUSED]
 GM_ROLES = ['DCS Admin', 'GameMaster']
+
+SIDES = {0: 'neutral', 1: 'red', 2: 'blue'}
+# Airbase.Category, as the bot's own getAirbases reports it
+CATEGORIES = {0: 'AIRDROME', 1: 'FARP', 2: 'SHIP'}
+
+
+def norm(name: str) -> str:
+    """
+    Comparison key for an airbase name.
+
+    The bot reads names from the terrain config while the mission reads them from
+    the Airbase object, and the two disagree on punctuation and spacing for a few
+    fields ('Al Dhafra AB' vs 'Al-Dhafra AB'). Stripping everything but letters
+    and digits makes the two lists merge instead of producing duplicate entries.
+    """
+    return re.sub(r'[^a-z0-9]', '', (name or '').casefold())
 
 
 # ---------------------------------------------------------------- Lua helpers
@@ -47,52 +64,77 @@ async def _server(interaction: discord.Interaction) -> Optional[Server]:
 
 
 async def airbase_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-    """Airbases in the running mission, with their stored level where there is one."""
+    """
+    Every airbase on the current map, searchable by name or ICAO.
+
+    Discord shows at most 25 choices and most maps have far more airfields than
+    that, so what matters is the ordering: an exact or leading ICAO match comes
+    first, then a name that starts with what was typed, then anything containing
+    it. Typing 'OMA' puts OMAM at the top rather than burying it behind a dozen
+    unrelated fields.
+    """
     server = await _server(interaction)
     if not server:
         return []
     plugin: Airport = interaction.client.cogs['Airport']
 
-    async with plugin.apool.connection() as conn:
-        cursor = await conn.execute(
-            "SELECT airbase, level FROM jsh_airport_levels WHERE server_name = %s", (server.name,))
-        levels = {r[0]: r[1] for r in await cursor.fetchall()}
+    try:
+        levels = await plugin.airbase_levels(server)
+    except Exception:
+        levels = {}
 
-    live = plugin.airbases.get(server.name)
-    problem = None
-    if live is None:
-        # First use on this mission: ask for the list, but don't let Discord time out.
-        try:
-            live, problem = await plugin.refresh_airbases(server, timeout=2, explain=True)
-        except Exception as ex:
-            live, problem = [], str(ex)
+    bases, problem = await plugin.map_airbases(server, fetch=True, explain=True)
 
-    choices = []
-    if live:
-        sides = {0: 'neutral', 1: 'red', 2: 'blue'}
-        for base in live:
-            name = base.get('name')
-            if not name or current.lower() not in name.lower():
-                continue
-            label = f"{name} [{sides.get(base.get('coalition'), '?')}]"
-            if base.get('category') and base['category'] != 'AIRDROME':
-                label += f" {base['category']}"
-            if name in levels:
-                label += f" - level {levels[name]}"
-            choices.append(app_commands.Choice(name=label[:100], value=name))
-    else:
+    if not bases:
+        # Nothing from either source: fall back to airbases already set here, and
+        # if there are none of those either, say why the list is empty. An empty
+        # dropdown with no reason is the worst outcome. Typing a name still works,
+        # and the command itself reports the real error.
         choices = [app_commands.Choice(name=f"{n} (level {lvl})", value=n)
-                   for n, lvl in sorted(levels.items()) if current.lower() in n.lower()]
+                   for n, lvl in sorted(levels.items()) if current.casefold() in n.casefold()]
         if not choices:
-            # Nothing live and nothing stored: an empty dropdown with no reason is
-            # the worst outcome, so put the reason in front of the GM. Typing a
-            # name still works, and the command itself reports the real error.
             if problem == "still loading":
                 label = "[loading airbases from the mission - type another letter]"
             else:
                 label = f"[cannot read airbases: {problem or 'the mission returned none'}]"
             choices = [app_commands.Choice(name=label[:100], value=current or "?")]
-    return choices[:25]
+        return choices[:25]
+
+    query = (current or '').strip()
+    key, upper = norm(query), query.upper()
+    ranked: list[tuple[int, str, app_commands.Choice[str]]] = []
+    for base in bases:
+        name, icao = base['name'], base['icao']
+        if not key:
+            rank = 4
+        elif icao and icao == upper:
+            rank = 0
+        elif icao and icao.startswith(upper):
+            rank = 1
+        elif norm(name).startswith(key):
+            rank = 2
+        elif key in norm(name):
+            rank = 3
+        else:
+            continue
+        label = f"{icao} - {name}" if icao else name
+        label += f" [{SIDES.get(base['coalition'], '?')}]"
+        if base['kind'] != 'AIRDROME':
+            label += f" {base['kind']}"
+        if name in levels:
+            label += f" - level {levels[name]}"
+        ranked.append((rank, name, app_commands.Choice(name=label[:100], value=name)))
+
+    ranked.sort(key=lambda r: (r[0], r[1]))
+    if len(ranked) <= 25:
+        return [choice for _, _, choice in ranked]
+    # More matches than Discord will show. Spend the last slot saying so, rather
+    # than letting the list look complete when it isn't.
+    choices = [choice for _, _, choice in ranked[:24]]
+    choices.append(app_commands.Choice(
+        name=f"[+{len(ranked) - 24} more - type more letters, or see /airport list]"[:100],
+        value=query or "?"))
+    return choices
 
 
 # ---------------------------------------------------------------- plugin
@@ -167,6 +209,118 @@ class Airport(Plugin[AirportEventListener]):
         bases = self.airbases.get(server.name, [])
         return (bases, problem) if explain else bases
 
+    # ------------------------------------------------------------ the map
+    async def map_airbases(self, server: Server, fetch: bool = False, explain: bool = False,
+                           timeout: int = 2):
+        """
+        Every airbase on the current map: {name, icao, kind, coalition}.
+
+        Two sources, because neither is complete on its own:
+
+        * The bot's own mission data (`current_mission.airbases`, filled by the
+          Mission plugin at mission load) covers every airfield on the terrain
+          plus the mission's FARPs and carriers, and is the only place the ICAO
+          code exists -- DCS exposes it in the terrain config, which the mission
+          scripting environment cannot read. It carries no coalition for
+          airfields, though, so it can't say who holds what.
+        * This plugin's own `listAirbases` reads the live Airbase objects, which
+          do know their coalition.
+
+        Merging them gives a list that is both complete and current. Names are
+        matched loosely (see norm) because the two sources punctuate a few fields
+        differently.
+        """
+        records: dict[str, dict] = {}
+
+        mission = getattr(server, 'current_mission', None)
+        for base in (getattr(mission, 'airbases', None) or []):
+            name = base.get('name')
+            if not name:
+                continue
+            kind = base.get('type') or CATEGORIES.get(base.get('category'), 'AIRDROME')
+            kind = str(kind).upper()
+            if kind in ('AIRBASE', 'CARRIER'):
+                kind = 'AIRDROME' if kind == 'AIRBASE' else 'SHIP'
+            records[norm(name)] = {
+                'name': name,
+                'icao': (str(base.get('code') or '').strip().upper() or None),
+                'kind': kind,
+                'coalition': base.get('coalition'),
+            }
+
+        live = self.airbases.get(server.name)
+        problem = None
+        if live is None and fetch:
+            try:
+                live, problem = await self.refresh_airbases(server, timeout=timeout, explain=True)
+            except Exception as ex:
+                live, problem = [], str(ex)
+        for base in (live or []):
+            name = base.get('name')
+            if not name:
+                continue
+            record = records.get(norm(name))
+            if record is None:
+                record = {'name': name, 'icao': None,
+                          'kind': str(base.get('category') or 'AIRDROME').upper(),
+                          'coalition': None}
+                records[norm(name)] = record
+            if base.get('coalition') is not None:
+                record['coalition'] = base['coalition']
+            # The mission's spelling wins: everything downstream goes back to
+            # Airbase.getByName, which only knows the name the mission uses. The
+            # ICAO and the kind from the bot's list are kept.
+            record['name'] = name
+
+        bases = sorted(records.values(), key=lambda r: r['name'])
+        return (bases, problem) if explain else bases
+
+    async def resolve_airbase(self, server: Server, text: str) -> tuple[Optional[str], Optional[str]]:
+        """
+        Turns whatever the GM typed or picked into the airbase name DCS knows.
+
+        Accepts the name, the ICAO code, or enough of either to be unambiguous,
+        and returns (name, None) or (None, message). Everything downstream -- the
+        warehouse calls and the levels table -- keys on the name, so ICAO is only
+        ever an input alias and never reaches storage.
+        """
+        text = (text or '').strip()
+        if not text:
+            return None, "No airbase given."
+        # fetch=True matters here: the merged name has to be the one the mission
+        # itself uses, because that is what Airbase.getByName will be given.
+        bases = await self.map_airbases(server, fetch=True, timeout=10)
+        if not bases:
+            # Nothing to match against. Take it at face value; the mission will
+            # reject an unknown airbase with its own error.
+            return text, None
+
+        key, upper = norm(text), text.upper()
+        exact = [b for b in bases if b['icao'] and b['icao'] == upper]
+        if len(exact) == 1:
+            return exact[0]['name'], None
+        if len(exact) > 1:
+            # Shouldn't happen, but silently picking one of two airfields
+            # sharing a code would put stock in the wrong place.
+            return None, (f"{upper} is the code for {len(exact)} airbases on this map "
+                          f"({', '.join(b['name'] for b in exact)}). Use the name.")
+        for base in bases:
+            if norm(base['name']) == key:
+                return base['name'], None
+
+        matches = [b for b in bases
+                   if key and (key in norm(b['name'])
+                               or (b['icao'] and b['icao'].startswith(upper)))]
+        if len(matches) == 1:
+            return matches[0]['name'], None
+        if not matches:
+            return None, (f"No airbase on this map matches `{text}`. "
+                          f"Use `/airport list` to see them all.")
+        shown = ", ".join(f"{b['icao'] + ' ' if b['icao'] else ''}{b['name']}" for b in matches[:8])
+        if len(matches) > 8:
+            shown += ", ..."
+        return None, f"`{text}` matches {len(matches)} airbases ({shown}). Be more specific."
+
     # ------------------------------------------------------------ warehouse sheets
     def sheet_path(self, server: Server, level: int) -> str:
         cfg = self.get_config(server)
@@ -238,6 +392,13 @@ class Airport(Plugin[AirportEventListener]):
         return f"\n{len(failed)} items not accepted by DCS: {shown}"
 
     # ------------------------------------------------------------ level storage
+    async def airbase_levels(self, server: Server) -> dict[str, int]:
+        """Stored level per airbase name on this server."""
+        async with self.apool.connection() as conn:
+            cursor = await conn.execute(
+                "SELECT airbase, level FROM jsh_airport_levels WHERE server_name = %s", (server.name,))
+            return {row[0]: row[1] for row in await cursor.fetchall()}
+
     async def get_level(self, server: Server, airbase: str) -> Optional[int]:
         async with self.apool.connection() as conn:
             cursor = await conn.execute(
@@ -276,6 +437,10 @@ class Airport(Plugin[AirportEventListener]):
         await interaction.response.defer(ephemeral=True)
         if await self.refuse_if_disabled(interaction, server):
             return
+        airbase, error = await self.resolve_airbase(server, airbase)
+        if error:
+            await interaction.followup.send(error, ephemeral=True)
+            return
         current = await self.get_level(server, airbase)
         result = await self.apply_sheet(server, airbase, level.value)
         if not result.get('ok'):
@@ -303,6 +468,10 @@ class Airport(Plugin[AirportEventListener]):
                      airbase: str, percent: app_commands.Choice[int]):
         await interaction.response.defer(ephemeral=True)
         if await self.refuse_if_disabled(interaction, server):
+            return
+        airbase, error = await self.resolve_airbase(server, airbase)
+        if error:
+            await interaction.followup.send(error, ephemeral=True)
             return
 
         result = await self.damage_warehouse(server, airbase, percent.value)
@@ -335,6 +504,87 @@ class Airport(Plugin[AirportEventListener]):
         await interaction.followup.send(
             "\n".join(lines) + self.failed_note(result), ephemeral=True)
 
+    @airport_group.command(name='list', description='List every airbase on the current map, with ICAO and level')
+    @app_commands.guild_only()
+    @utils.app_has_roles(GM_ROLES)
+    @app_commands.choices(side=[
+        app_commands.Choice(name="Blue", value=2),
+        app_commands.Choice(name="Red", value=1),
+        app_commands.Choice(name="Neutral", value=0),
+    ])
+    @app_commands.choices(kind=[
+        app_commands.Choice(name="Airfields", value="AIRDROME"),
+        app_commands.Choice(name="FARPs", value="FARP"),
+        app_commands.Choice(name="Ships", value="SHIP"),
+    ])
+    async def airports(self, interaction: discord.Interaction,
+                       server: app_commands.Transform[Server, utils.ServerTransformer(status=RUNNING)],
+                       side: Optional[app_commands.Choice[int]] = None,
+                       kind: Optional[app_commands.Choice[str]] = None,
+                       stocked_only: Optional[bool] = False):
+        """The whole map, which the 25-choice dropdown can never show."""
+        await interaction.response.defer(ephemeral=True)
+        bases, problem = await self.map_airbases(server, fetch=True, explain=True, timeout=10)
+        if not bases:
+            await interaction.followup.send(
+                f"Could not read the airbases on {server.name}: "
+                f"{problem or 'the mission returned none'}.", ephemeral=True)
+            return
+        levels = await self.airbase_levels(server)
+
+        shown = [b for b in bases
+                 if (side is None or b['coalition'] == side.value)
+                 and (kind is None or b['kind'] == kind.value)
+                 and (not stocked_only or b['name'] in levels)]
+        if not shown:
+            await interaction.followup.send(
+                f"{len(bases)} airbases on {server.name}, none matching that filter.", ephemeral=True)
+            return
+
+        filters = [f for f in (side.name.lower() if side else None,
+                               kind.name.lower() if kind else None,
+                               "with a level" if stocked_only else None) if f]
+        title = f"Airbases - {server.name}"
+        if filters:
+            title += f" ({', '.join(filters)})"
+
+        # One embed per page of 25, up to Discord's limit of 10 embeds per
+        # message. Paging with buttons would need state kept alive between
+        # clicks; a map's worth of airbases fits in a handful of embeds.
+        pages = [shown[i:i + 25] for i in range(0, len(shown), 25)]
+        embeds, overflow = [], 0
+        if len(pages) > 10:
+            overflow = sum(len(p) for p in pages[10:])
+            pages = pages[:10]
+        for index, page in enumerate(pages):
+            embed = discord.Embed(color=discord.Color.blue())
+            if index == 0:
+                embed.title = title
+            embed.add_field(
+                name="ICAO",
+                value="\n".join(b['icao'] or '-' for b in page), inline=True)
+            embed.add_field(
+                name="Airbase",
+                value="\n".join(
+                    b['name'] + ('' if b['kind'] == 'AIRDROME' else f" ({b['kind'].title()})")
+                    for b in page),
+                inline=True)
+            embed.add_field(
+                name="Side / level",
+                value="\n".join(
+                    f"{SIDES.get(b['coalition'], '?')}"
+                    + (f" - {levels[b['name']]}" if b['name'] in levels else "")
+                    for b in page),
+                inline=True)
+            if index == len(pages) - 1:
+                footer = f"{len(shown)} of {len(bases)} airbases" if filters else f"{len(bases)} airbases"
+                if overflow:
+                    footer += f" - {overflow} not shown, narrow the filter"
+                embed.set_footer(text=footer)
+            embeds.append(embed)
+
+        await interaction.followup.send(embeds=embeds, ephemeral=True)
+
     @airport_group.command(description='Show airbase levels on a server')
     @app_commands.guild_only()
     @utils.app_has_roles(GM_ROLES)
@@ -349,8 +599,14 @@ class Airport(Plugin[AirportEventListener]):
         if not rows:
             await interaction.followup.send(f"No airbase levels set on {server.name} yet.", ephemeral=True)
             return
+        # ICAO where the map can supply one, so this reads the same way as
+        # /airport list. Absent for FARPs and ships, and for a stopped server.
+        icaos = {b['name']: b['icao'] for b in await self.map_airbases(server) if b['icao']}
         embed = discord.Embed(title=f"Airbase levels - {server.name}", color=discord.Color.blue())
-        embed.add_field(name="Airbase", value="\n".join(r[0] for r in rows), inline=True)
+        embed.add_field(
+            name="Airbase",
+            value="\n".join(f"{icaos[r[0]]} - {r[0]}" if r[0] in icaos else r[0] for r in rows),
+            inline=True)
         embed.add_field(name="Level", value="\n".join(str(r[1]) for r in rows), inline=True)
         embed.add_field(name="Set by", value="\n".join(f"{r[2]} ({r[3]:%d %b})" for r in rows), inline=True)
         await interaction.followup.send(embed=embed, ephemeral=True)

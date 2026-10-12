@@ -16,6 +16,18 @@ change.
 A pilot the bot has not sent falls through to Foothold's own answer, so an
 unknown player is never worse off than before.
 
+Since Foothold 5.3.0 `getPlayerRank` takes and returns a second value, the
+pilot's career record, which newer callers thread back in to avoid re-reading
+it. The wrapper always calls through and passes that record back with our
+level, so Foothold's own bookkeeping is unaffected. `getPlayerRank` never
+creates a record, so calling through is a read.
+
+The wrapper is tagged and re-checked on every push rather than latched behind a
+flag. Foothold assigns its rank methods when `zoneCommanderv2.lua` loads, so in
+practice ours goes on top and stays — but if anything ever replaced the
+function, a flag would leave the plugin silently detached for the rest of the
+mission with nothing in the log to say so.
+
 The ladder itself comes from `rankstatus`, which is what `/pilot status` uses.
 There is deliberately no second implementation here: a parallel calculation
 would drift from the Discord roles the moment anyone edited the achievements.
@@ -38,6 +50,22 @@ would drift from the Discord roles the moment anyone edited the achievements.
 
 `dcs.log` should show `[jsh_ranks] loaded`, then `attached to BattleCommander`
 and `received N rank(s)`.
+
+## If ranks are not being enforced
+
+The log distinguishes the three ways this fails, which otherwise all look
+identical in game — pilots stuck at `default_level`, unable to buy anything
+above it.
+
+| What `dcs.log` shows | What it means |
+| --- | --- |
+| no `attached to BattleCommander` | The hook never went on: `BattleCommander` did not exist when the script ran. Check `[jsh_ranks] loaded` appears at all, and that the bot was restarted before DCS. |
+| `received 0 rank(s)` | The bot pushed nothing — nobody was on the server, or no campaign is running. |
+| `no rank pushed for <pilot>` | The hook is working and being consulted, but that pilot had no level in the push. Look in the bot log for `no rank_map entry for ...`: the ladder isn't mapping. |
+| `<pilot>: level N (Foothold would have said M)` | Working as intended. If N is still too low for the shop, the problem is `rank_map` or the pilot's credits, not the hook. |
+
+Each pilot is logged once per mission, on the first lookup, so these lines
+don't accumulate on every menu refresh.
 
 ## Configuration
 

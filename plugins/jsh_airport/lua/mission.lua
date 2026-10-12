@@ -6,6 +6,13 @@ if jsh_airport then return end
 jsh_airport = {}
 local AP = jsh_airport
 
+-- Bind the bot's table explicitly, the way DCSServerBot's own plugin mission
+-- scripts do. It is a global here once DCSServerBot.lua has loaded, but relying
+-- on that leaves every reply a silent no-op if it hasn't, which looks from
+-- Discord exactly like a timeout.
+local base = _G
+dcsbot = dcsbot or base.dcsbot
+
 AP.debug = true
 
 local function log(msg)
@@ -16,6 +23,12 @@ local function reply(requestId, ok, err, failed)
   if dcsbot and dcsbot.sendBotTable then
     dcsbot.sendBotTable({ command = "jshAirportResult", request_id = requestId,
                           ok = ok, error = err, failed = failed })
+  elseif not AP.warnedNoBot then
+    -- Without this the bot just times out and blames mission.lua, which is
+    -- loaded and running -- it is the channel back that is missing.
+    AP.warnedNoBot = true
+    env.error("[jsh_airport] cannot reply: DCSServerBot.lua is not loaded in this "
+              .. "mission, so every command will time out")
   end
 end
 

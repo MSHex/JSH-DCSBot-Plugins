@@ -176,8 +176,18 @@ class Airport(Plugin[AirportEventListener]):
         try:
             return await asyncio.wait_for(future, timeout)
         except asyncio.TimeoutError:
+            # Name the causes in the order they actually happen, because the bare
+            # "mission.lua isn't loaded" wording sent people looking at the
+            # mission when the usual answer is an uninstalled node or a missed
+            # restart.
             return {"ok": False, "timeout": True,
-                    "error": "no reply from the mission (is the plugin's mission.lua loaded?)"}
+                    "error": ("no reply from the mission. In order of likelihood: "
+                              "jsh_airport is missing from this node's `opt_plugins`; "
+                              "the bot has not been restarted since it was added "
+                              "(that is when mission.lua is copied to the server); "
+                              "or DCS has not been restarted since the bot was. "
+                              "`dcs.log` on that node says which — look for "
+                              "`Airport: mission.lua NOT FOUND` or `[jsh_airport] loaded`.")}
         finally:
             self.pending.pop(request_id, None)
 

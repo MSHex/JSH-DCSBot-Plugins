@@ -81,6 +81,33 @@ data without coalitions; failing that, to airbases already set on that server;
 and failing that, it shows why it is empty rather than nothing at all. A typed
 name always works.
 
+### "no reply from the mission"
+Every warehouse command is a round trip: the bot sends a snippet, `mission.lua`
+runs it and replies through `dcsbot.sendBotTable`. A timeout means that loop
+never closed, and the cause is almost always installation rather than the
+mission. In order of likelihood:
+
+1. **`jsh_airport` is missing from that node's `opt_plugins`.** The bot copies
+   each plugin's `lua/` folder into
+   `Saved Games/<instance>/Scripts/net/DCSServerBot/<plugin>/` for every plugin
+   in **that node's** `main.yaml`. On a multi-node setup it is easy to add the
+   plugin on one node only: the master lists it at startup and the Discord
+   commands appear, but the other node's servers have no `mission.lua` and no
+   `jshAirportRun` handler, so commands there go nowhere.
+2. **The bot has not been restarted since the plugin was added** — that copy
+   happens at bot startup, nowhere else.
+3. **DCS has not been restarted since the bot was** — the mission loads
+   `mission.lua` at mission start.
+
+`dcs.log` on the node in question names which:
+
+| Line | Meaning |
+| --- | --- |
+| `Airport: mission.lua NOT FOUND at ...` | Cause 1 or 2. The path in the message is where the bot should have put it. |
+| `Airport: loading ...` then `[jsh_airport] loaded` | Installed and running. |
+| `[jsh_airport] cannot reply: DCSServerBot.lua is not loaded in this mission` | `mission.lua` is running but has no channel back to the bot. The mission itself isn't wired to DCSServerBot. |
+| nothing at all | The bot never asked. Check `enabled` for that instance in `jsh_airport.yaml` — a disabled server answers `Airport is disabled on ...` instead of timing out, so silence here means the plugin isn't loaded on the master either. |
+
 ### If the dropdown is empty
 The dropdown says which of these it is, rather than showing nothing.
 

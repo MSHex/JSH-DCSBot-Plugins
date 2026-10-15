@@ -72,14 +72,43 @@ def lua_value(value) -> str:
 
 # ---------------------------------------------------------------- autocomplete
 async def _server(interaction: discord.Interaction) -> Optional[Server]:
+    """
+    The server already picked in the command, so autocomplete can scope to it.
+
+    `interaction.namespace` is how DCSServerBot's own autocompleters read an
+    earlier parameter. Earlier versions of this plugin called a
+    `utils.get_interaction_param()` helper that does not exist in the bot: every
+    call raised AttributeError, the except below swallowed it, `_server` returned
+    None and the dropdown was empty for the life of the plugin. Hence the log
+    line -- a silent except here costs a whole feature and shows nothing
+    anywhere.
+    """
     try:
         return await utils.ServerTransformer().transform(
-            interaction, utils.get_interaction_param(interaction, 'server'))
-    except Exception:
+            interaction, interaction.namespace.server)
+    except Exception as ex:
+        interaction.client.log.warning(
+            f"Airport: autocomplete could not resolve the server: {ex}")
         return None
 
 
 async def airbase_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    """
+    Wrapper that guarantees the dropdown says something.
+
+    Discord renders nothing at all when an autocomplete raises, which is
+    indistinguishable from "this map has no airbases" and leaves no trace. Every
+    failure gets logged and put in front of whoever is typing instead.
+    """
+    try:
+        return await _airbase_choices(interaction, current)
+    except Exception as ex:
+        interaction.client.log.exception(ex)
+        return [app_commands.Choice(name=f"[airbase lookup failed: {ex}]"[:100],
+                                    value=current or "?")]
+
+
+async def _airbase_choices(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     """
     Every airbase on the current map, searchable by name or ICAO.
 
@@ -91,12 +120,14 @@ async def airbase_autocomplete(interaction: discord.Interaction, current: str) -
     """
     server = await _server(interaction)
     if not server:
-        return []
+        return [app_commands.Choice(
+            name="[pick the server first, then retype the airbase]", value=current or "?")]
     plugin: Airport = interaction.client.cogs['Airport']
 
     try:
         levels = await plugin.airbase_levels(server)
-    except Exception:
+    except Exception as ex:
+        interaction.client.log.warning(f"Airport: could not read stored levels: {ex}")
         levels = {}
 
     bases, problem = await plugin.map_airbases(server, fetch=True, explain=True)

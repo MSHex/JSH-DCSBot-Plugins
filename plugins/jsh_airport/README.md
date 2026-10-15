@@ -131,6 +131,16 @@ mission. In order of likelihood:
 ### If the dropdown is empty
 The dropdown says which of these it is, rather than showing nothing.
 
+- **"pick the server first, then retype the airbase"** — the `server` parameter
+  has to be filled in before the airbase list can be scoped to a map.
+- **"airbase lookup failed: ..."** — the autocomplete raised. The full traceback
+  is in the bot log. Discord renders *nothing* when an autocomplete raises, which
+  is why this is reported in the dropdown rather than left to look like an empty
+  map: in 1.3–1.5 the plugin called a `utils.get_interaction_param()` helper that
+  does not exist in DCSServerBot, and a bare `except` swallowed the
+  AttributeError, so the list was empty from the day it shipped with nothing in
+  any log. Typing the airbase name by hand always worked, which is what masked it.
+
 - **"loading airbases from the mission"** — normal on the first use after a
   mission starts. Discord gives autocomplete about 3 seconds and the round trip
   through DCS can take longer, so the first attempt may miss. The reply is

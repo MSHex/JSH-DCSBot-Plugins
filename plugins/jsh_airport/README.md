@@ -81,6 +81,26 @@ data without coalitions; failing that, to airbases already set on that server;
 and failing that, it shows why it is empty rather than nothing at all. A typed
 name always works.
 
+### The 8192-byte ceiling
+Every command the bot sends DCS is one UDP datagram, and the DCS side reads it
+with LuaSocket's `UDPRecvSocket:receive()` — no size argument, so the default
+**8192-byte** buffer. A larger datagram is silently truncated: the JSON stops
+parsing, no handler is dispatched, nothing runs and nothing replies. Neither side
+logs anything; the only symptom is a timeout.
+
+`/airport level` has to stay under that, because a level sheet is a few hundred
+items. It chunks by **bytes, not item count** — item names run from `A-10C` to
+`weapons.bombs.BLU-3B_R_GROUP`, roughly 24 to 42 bytes serialised, so 200
+aircraft fit in 5 KB while 200 weapons need 8.8 KB. `warehouse_request` also
+measures every outgoing datagram and refuses to send an oversized one, with the
+byte count, rather than letting it vanish.
+
+This bit 1.3 and 1.4: aircraft applied, weapons silently didn't, and the command
+reported a timeout even though `dcs.log` showed
+`warehouse <airbase> updated, failures: 0` from the chunk that did land. If you
+ran `/airport level` on those versions, re-run it — the affected airbases have
+aircraft but no weapons.
+
 ### "no reply from the mission"
 Every warehouse command is a round trip: the bot sends a snippet, `mission.lua`
 runs it and replies through `dcsbot.sendBotTable`. A timeout means that loop
@@ -110,6 +130,16 @@ mission. In order of likelihood:
 
 ### If the dropdown is empty
 The dropdown says which of these it is, rather than showing nothing.
+
+- **"pick the server first, then retype the airbase"** — the `server` parameter
+  has to be filled in before the airbase list can be scoped to a map.
+- **"airbase lookup failed: ..."** — the autocomplete raised. The full traceback
+  is in the bot log. Discord renders *nothing* when an autocomplete raises, which
+  is why this is reported in the dropdown rather than left to look like an empty
+  map: in 1.3–1.5 the plugin called a `utils.get_interaction_param()` helper that
+  does not exist in DCSServerBot, and a bare `except` swallowed the
+  AttributeError, so the list was empty from the day it shipped with nothing in
+  any log. Typing the airbase name by hand always worked, which is what masked it.
 
 - **"loading airbases from the mission"** — normal on the first use after a
   mission starts. Discord gives autocomplete about 3 seconds and the round trip

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import discord
 import os
 import re
@@ -15,6 +16,21 @@ from .listener import AirportEventListener
 
 RUNNING = [Status.RUNNING, Status.PAUSED]
 GM_ROLES = ['DCS Admin', 'GameMaster']
+
+# The bot hands each command to DCS as a single UDP datagram
+# (ServerImpl.send_to_dcs -> transport.sendto), and the DCS side reads it with
+# LuaSocket's UDPRecvSocket:receive() -- called with no size argument, so the
+# default 8192-byte buffer. A larger datagram is silently TRUNCATED: the JSON no
+# longer parses, net.json2lua gives nothing dcsbot[...] can dispatch, so no
+# handler runs, nothing replies, and the only symptom is a timeout 15 seconds
+# later. Nothing logs it on either side.
+DATAGRAM_LIMIT = 8192
+# Headroom for the fields the bot adds on the way out (server_name and channel
+# for a remote server) and for JSON escaping.
+DATAGRAM_MARGIN = 400
+# What one applyWarehouse request may spend on its items table. The rest of the
+# budget goes to the guard boilerplate, the airbase name and the liquids.
+ITEM_BUDGET = 5200
 
 SIDES = {0: 'neutral', 1: 'red', 2: 'blue'}
 # Airbase.Category, as the bot's own getAirbases reports it
@@ -165,14 +181,30 @@ class Airport(Plugin[AirportEventListener]):
                 f'{", " + args if args else ""})')
         # If the mission is running an older mission.lua, reply with a clear
         # message instead of raising a Lua error in the mission.
-        await server.send_to_dcs({
+        message = {
             "command": "jshAirportRun",
             "lua": (f'if jsh_airport and jsh_airport.{method} then {call} '
                     f'elseif dcsbot and dcsbot.sendBotTable then '
                     f'dcsbot.sendBotTable({{ command = "jshAirportResult", '
                     f'request_id = {lua_str(request_id)}, ok = false, '
                     f'error = "mission.lua is out of date or not loaded - restart the mission" }}) end')
-        })
+        }
+        # Measure what actually goes on the wire. A datagram over the limit is
+        # dropped on the floor by DCS with no error anywhere, so refusing to send
+        # it, loudly, beats waiting for a timeout that explains nothing. Callers
+        # that can split their payload (apply_sheet) size their chunks so this
+        # never fires; this is the backstop for everything else.
+        size = len(json.dumps(message).encode('utf-8'))
+        if size > DATAGRAM_LIMIT - DATAGRAM_MARGIN:
+            self.pending.pop(request_id, None)
+            self.log.error(f"Airport: {method} payload is {size} bytes, over the "
+                           f"{DATAGRAM_LIMIT}-byte datagram DCS can receive")
+            return {"ok": False, "oversized": True,
+                    "error": (f"the request is too large to send to DCS "
+                              f"({size:,} bytes; the limit is {DATAGRAM_LIMIT:,}). "
+                              f"This is a bug — please report which command and "
+                              f"airbase you used.")}
+        await server.send_to_dcs(message)
         try:
             return await asyncio.wait_for(future, timeout)
         except asyncio.TimeoutError:
@@ -356,6 +388,33 @@ class Airport(Plugin[AirportEventListener]):
         finally:
             wb.close()
 
+    @staticmethod
+    def pack_items(items, budget: int = ITEM_BUDGET) -> list[list[tuple]]:
+        """
+        Splits warehouse items into chunks small enough for one DCS datagram.
+
+        Sizing by item count cannot work: names run from 'A-10C' to
+        'weapons.bombs.BLU-3B_R_GROUP', roughly 24 to 42 bytes each once
+        serialised. 200 aircraft fit in 5 KB while 200 weapons need 8.8 KB, which
+        is over the 8192-byte buffer DCS reads with -- so the aircraft applied and
+        the weapons vanished without a word. Size by the bytes actually spent.
+        """
+        chunks: list[list[tuple]] = []
+        current: list[tuple] = []
+        size = 0
+        for name, count in items:
+            # Exactly what lua_value() will render for this pair, plus 2 bytes
+            # for the backslashes JSON adds to its two quotes.
+            cost = len(f'[{lua_str(name)}] = {lua_value(int(count))}, '.encode('utf-8')) + 2
+            if current and size + cost > budget:
+                chunks.append(current)
+                current, size = [], 0
+            current.append((name, count))
+            size += cost
+        if current:
+            chunks.append(current)
+        return chunks or [[]]
+
     async def apply_sheet(self, server: Server, airbase: str, level: int) -> dict:
         """Applies warehouse-lvl<level>.xlsx to the airbase, in chunks. Returns {ok, error, failed}."""
         path = self.sheet_path(server, level)
@@ -366,8 +425,7 @@ class Airport(Plugin[AirportEventListener]):
         except Exception as ex:
             return {"ok": False, "error": f"could not read {path}: {ex}"}
 
-        names = list(sheet["items"].items())
-        chunks = [names[i:i + 200] for i in range(0, len(names), 200)] or [[]]
+        chunks = self.pack_items(sheet["items"].items())
         failed: list[str] = []
         for i, chunk in enumerate(chunks):
             preset = {"items": dict(chunk)}

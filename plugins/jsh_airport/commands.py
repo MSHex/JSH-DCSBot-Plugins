@@ -29,7 +29,7 @@ DATAGRAM_LIMIT = 8192
 # for a remote server) and for JSON escaping.
 DATAGRAM_MARGIN = 400
 # What one applyWarehouse request may spend on its items table. The rest of the
-# budget goes to the guard boilerplate, the airbase name and the liquids.
+# budget goes to the guard boilerplate and the airbase name.
 ITEM_BUDGET = 5200
 
 SIDES = {0: 'neutral', 1: 'red', 2: 'blue'}
@@ -403,19 +403,25 @@ class Airport(Plugin[AirportEventListener]):
 
     @staticmethod
     def read_sheet(path: str) -> dict:
-        """Reads an /airbase info export: sheets Aircraft, Weapons, Liquids with columns Name, Count."""
+        """
+        Reads an /airbase info export: sheets Aircraft and Weapons, columns Name
+        and Count.
+
+        A Liquids sheet is ignored on purpose. Fuel at an airbase belongs to the
+        campaign's economy, not to a level, so nothing here ever writes it --
+        leave the sheet in the workbook if you like, it is simply not read.
+        """
         wb = load_workbook(path, read_only=True, data_only=True)
         try:
-            items, liquids = {}, {}
-            for sheet in ('Aircraft', 'Weapons', 'Liquids'):
+            items = {}
+            for sheet in ('Aircraft', 'Weapons'):
                 if sheet not in wb.sheetnames:
                     continue
                 for row in wb[sheet].iter_rows(min_row=2, values_only=True):
                     if not row or row[0] is None or len(row) < 2 or row[1] is None:
                         continue
-                    target = liquids if sheet == 'Liquids' else items
-                    target[str(row[0]).strip()] = int(float(row[1]))
-            return {"items": items, "liquids": liquids}
+                    items[str(row[0]).strip()] = int(float(row[1]))
+            return {"items": items}
         finally:
             wb.close()
 
@@ -458,10 +464,8 @@ class Airport(Plugin[AirportEventListener]):
 
         chunks = self.pack_items(sheet["items"].items())
         failed: list[str] = []
-        for i, chunk in enumerate(chunks):
+        for chunk in chunks:
             preset = {"items": dict(chunk)}
-            if i == 0:
-                preset["liquids"] = sheet["liquids"]
             result = await self.warehouse_request(
                 server, "applyWarehouse", f"{lua_str(airbase)}, {lua_value(preset)}")
             if not result.get('ok'):
@@ -580,9 +584,8 @@ class Airport(Plugin[AirportEventListener]):
             return
 
         before, after = result.get('items_before', 0), result.get('items_after', 0)
-        fuel_before, fuel_after = result.get('fuel_before', 0), result.get('fuel_after', 0)
 
-        if before == 0 and fuel_before == 0:
+        if before == 0:
             await interaction.followup.send(
                 f"{airbase} on {server.name}: nothing to deduct - the warehouse is "
                 f"already empty, or set to unlimited in the mission editor.",
@@ -590,8 +593,8 @@ class Airport(Plugin[AirportEventListener]):
             return
 
         lines = [f"{airbase} on {server.name}: {percent.value}% damage applied.",
-                 f"Items: {before:,} -> {after:,}",
-                 f"Liquids: {fuel_before:,} -> {fuel_after:,}"]
+                 f"Aircraft and weapons: {before:,} -> {after:,}",
+                 "Fuel: untouched."]
 
         # 100% means the base can no longer spawn anything, so its level is 0.
         if percent.value == 100:

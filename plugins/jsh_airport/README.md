@@ -24,8 +24,8 @@ Excel sheets and tracks the level per airbase.
 - `/airport damage server airbase percent` — battle damage. Deducts 25%, 50%,
   75% or 100% from **what is in the warehouse right now**, not from the level
   sheet, so whatever players have already used is accounted for: a base down to
-  half a sheet loses half of that half. Aircraft, weapons and liquids are all
-  scaled. The reply shows the totals before and after.
+  half a sheet loses half of that half. Aircraft and weapons are scaled; **fuel
+  is not**. The reply shows the totals before and after.
 - `/airport list server [side] [kind] [stocked_only]` — every airbase on the
   current map with its ICAO, its coalition and its level, which the dropdown
   can't show in full (Discord stops at 25 choices and most maps have far more
@@ -157,11 +157,23 @@ read, which is the quickest way to tell a mission-side problem from a bot-side
 one: if that line appears and the dropdown is still empty, the problem is in the
 bot.
 
+## Fuel is never touched
+Neither command writes fuel, and there is no setting to make them. `/airport
+level` stocks aircraft and weapons; `/airport damage` destroys aircraft and
+weapons. Liquids at an airbase belong to the campaign's economy — a level is
+what a base is *stocked* with, and battle damage destroys materiel, not the fuel
+farm.
+
+In practice that means `setLiquidAmount` is not called anywhere in
+`mission.lua`, `damageWarehouse` does not walk `inv.liquid`, and a `Liquids`
+sheet in a level workbook is read past. Before 1.7 both commands did scale fuel
+— `/airport damage` at 75% took a base from 4,000,000 to 1,000,000 kg.
+
 ## Warehouse sheets
-Use exports from `/airbase info` unchanged: sheets Aircraft, Weapons, Liquids
-with columns Name and Count. Liquids rows 0-3 are jet fuel, avgas, MW50, diesel
-(kg). Every row is applied as an absolute count. Items DCS rejects are listed in
-the reply; everything else still applies.
+Use exports from `/airbase info` unchanged: sheets **Aircraft** and **Weapons**,
+columns Name and Count. Every row is applied as an absolute count. Items DCS
+rejects are listed in the reply; everything else still applies. A Liquids sheet
+can stay in the workbook — it is simply not read.
 
 ## Database
 - `jsh_airport_levels` — current level per (server, airbase), with who set it and when.

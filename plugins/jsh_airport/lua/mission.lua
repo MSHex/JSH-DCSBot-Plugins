@@ -33,7 +33,12 @@ local function reply(requestId, ok, err, failed)
 end
 
 ---------------------------------------------------------------- WAREHOUSES
-local LIQUIDS = { jet_fuel = 0, avgas = 1, mw50 = 2, diesel = 3 }
+--
+-- Fuel is never touched, by either command. Liquids at an airbase are the
+-- campaign's own economy and are not this plugin's to move: a level is what a
+-- base is stocked with, and battle damage destroys materiel, not the fuel farm.
+-- There is deliberately no option for it -- setLiquidAmount is not called
+-- anywhere in this file.
 
 local function getWarehouse(airbaseName)
   local ab = Airbase.getByName(airbaseName)
@@ -43,18 +48,13 @@ local function getWarehouse(airbaseName)
   return wh
 end
 
--- preset = { liquids = { ["0"] = kg, ... }, items = { [name] = count } }
--- Liquids: 0 jet fuel, 1 avgas, 2 MW50, 3 diesel (as in the /airbase info sheet).
--- Values are absolute. Anything not listed is left unchanged.
+-- preset = { items = { [name] = count } }
+-- Values are absolute. Anything not listed is left unchanged, and fuel is never
+-- written -- a `liquids` key is ignored if an older bot still sends one.
 function AP.applyWarehouse(requestId, airbaseName, preset)
   local wh, err = getWarehouse(airbaseName)
   if not wh then reply(requestId, false, err) return end
   local failed = {}
-  for liquid, amount in pairs(preset.liquids or {}) do
-    local t = LIQUIDS[liquid] or tonumber(liquid)
-    local ok = t and pcall(wh.setLiquidAmount, wh, t, amount)
-    if not ok then failed[#failed + 1] = tostring(liquid) end
-  end
   for item, count in pairs(preset.items or {}) do
     local ok = pcall(wh.setItem, wh, item, count)
     if not ok then failed[#failed + 1] = tostring(item) end
@@ -144,32 +144,20 @@ function AP.damageWarehouse(requestId, airbaseName, keep)
     return
   end
 
+  -- Aircraft and weapons only. inv.liquid is deliberately not walked, and
+  -- scaleTable only ever calls setItem, so no path here can reach fuel.
   scaleTable(wh, inv.aircraft, keep, stats)
   scaleTable(wh, inv.weapon, keep, stats)
-
-  -- Liquids are keyed by type (0 jet fuel, 1 avgas, 2 MW50, 3 diesel) and need
-  -- their own setter.
-  local fuelBefore, fuelAfter = 0, 0
-  for t = 0, 3 do
-    local amount
-    if pcall(function() amount = wh:getLiquidAmount(t) end) and type(amount) == "number" then
-      local after = math.floor(amount * keep)
-      fuelBefore = fuelBefore + amount
-      fuelAfter = fuelAfter + after
-      if after ~= amount then pcall(wh.setLiquidAmount, wh, t, after) end
-    end
-  end
 
   if dcsbot and dcsbot.sendBotTable then
     dcsbot.sendBotTable({ command = "jshAirportResult", request_id = requestId,
                           ok = true,
                           items_before = stats.before, items_after = stats.after,
-                          fuel_before = fuelBefore, fuel_after = fuelAfter,
                           changed = stats.changed,
                           failed = (#stats.failed > 0) and stats.failed or nil })
   end
-  log(string.format("%s damaged: items %d -> %d, liquids %d -> %d",
-                    airbaseName, stats.before, stats.after, fuelBefore, fuelAfter))
+  log(string.format("%s damaged: items %d -> %d (fuel untouched)",
+                    airbaseName, stats.before, stats.after))
 end
 
 log("loaded")

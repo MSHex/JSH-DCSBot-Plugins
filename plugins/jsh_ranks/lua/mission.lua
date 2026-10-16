@@ -22,13 +22,29 @@ local function log(msg)
   if JR.debug then env.info("[jsh_ranks] " .. msg) end
 end
 
--- Replaces the whole table each time: a player whose rank the bot no longer
--- sends falls back to Foothold's own answer rather than keeping a stale level.
+-- Merges each push instead of replacing the table.
+--
+-- A push only ever carries the pilots the bot can see at that moment. Replacing
+-- wholesale meant any push that omitted someone still flying -- a gap in the
+-- player list, a slot transition, a momentarily empty read -- dropped their rank
+-- until the next push, which can be refresh_minutes away. From inside the
+-- mission that is indistinguishable from the plugin having failed: the pilot is
+-- simply told their rank is insufficient.
+--
+-- Keeping an entry for a pilot who has left costs nothing, because it is
+-- overwritten the moment they return. An empty push is ignored outright: it only
+-- means nobody is on the server, and there is nothing there to govern.
 function JR.set(levels, names)
-  JR.levels = levels or {}
-  JR.names = names or {}
+  levels = levels or {}
   local n = 0
-  for _ in pairs(JR.levels) do n = n + 1 end
+  for _ in pairs(levels) do n = n + 1 end
+  if n > 0 then
+    for name, level in pairs(levels) do
+      JR.levels[name] = level
+    end
+  end
+  -- Names come from the config and are always sent complete, so they replace.
+  JR.names = names or {}
   log("received " .. n .. " rank(s)")
   JR.attach()
   JR.attachNames()

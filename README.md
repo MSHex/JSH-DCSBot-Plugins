@@ -5,7 +5,7 @@ written for the JSH servers and used in production there.
 
 | Plugin | What it does |
 | --- | --- |
-| [`jsh_credits`](plugins/jsh_credits/) | Holds kill credits until the pilot lands at a friendly airbase or FARP. Dropped on crash, eject, death, slot change or disconnect. |
+| [`jsh_credits`](plugins/jsh_credits/) | Holds kill and air-to-air refuelling credits until the pilot lands at a friendly airbase or FARP. Dropped on crash, eject, death, slot change or disconnect. |
 | [`jsh_csar`](plugins/jsh_csar/) | Pays credits for CSAR rescues and records them per pilot status. Supports Joker ADV_CSAR, Foothold, Ciribob CSAR and MOOSE Ops.CSAR. |
 | [`jsh_airport`](plugins/jsh_airport/) | GM commands to set an airbase, FARP or ship warehouse to a level (0-3) from Excel sheets, apply battle damage, and track the level per airbase. Airbases are picked by name or ICAO. |
 | [`hardcore`](plugins/hardcore/) | Hardcore mode and the flight economy: pays per flown block, with penalties for losses. |
@@ -24,12 +24,12 @@ arrangement is that no two of them ever pay for the same thing:
 
 | Writer | Pays for | `credits_log` event |
 | --- | --- | --- |
-| `jsh_credits` | kills, held until the pilot lands at a friendly base | `rtb` |
+| `jsh_credits` | kills and fuel taken from a tanker, held until the pilot lands at a friendly base | `rtb` |
 | CreditSystem | mission-script awards via `addUserPoints`, relabelled by whoever earned them | `csar`, … |
 | `hardcore` | flight economy settlement, and the Hardcore buy-in | `flight economy`, `hardcore buy-in` |
 | `awardautomation` | medal rewards | its own ledger |
 
-`jsh_credits` deliberately stays out of every path but kills. If you add another
+`jsh_credits` owns kills and refuelling, and stays out of every other path. If you add another
 credit source, give it its own event name and make sure nothing else pays the
 same event.
 

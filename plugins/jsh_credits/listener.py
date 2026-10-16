@@ -76,7 +76,10 @@ class CreditsEventListener(EventListener["Credits"]):
 
     @staticmethod
     def _new_bucket() -> dict[str, Any]:
-        return {'points': 0, 'reasons': {}, 'detail': {}, 'rows': []}
+        # refuel_lbs is the pounds already paid for this sortie, for the
+        # refuelling cap. It rides here because the bucket is created, dropped
+        # and paid out on exactly the sortie boundaries the cap needs.
+        return {'points': 0, 'reasons': {}, 'detail': {}, 'rows': [], 'refuel_lbs': 0}
 
     # ------------------------------------------------------------------
     # ledger (jsh_credits_events)
@@ -367,6 +370,70 @@ class CreditsEventListener(EventListener["Credits"]):
             self.log.debug(f"JSH Credits: landing for unknown player {data.get('name')}")
             return
         await self._payout(server, player, data.get('place', ''))
+
+    @event(name="jshCreditsRefuel")
+    async def jshCreditsRefuel(self, server: Server, data: dict) -> None:
+        """
+        Sent by lua/mission.lua when a pilot comes off a tanker, with the pounds
+        taken. Held like a kill, so refuelling is collected on landing and goes
+        the same way as everything else if the sortie ends badly.
+
+        Fuel is counted in thousands of pounds, so the rate is easy to set far
+        too high -- see the comparison table in jsh_credits.yaml.
+        """
+        config = self._config(server)
+        if not config or server.status != Status.RUNNING:
+            return
+        refuel = config.get('refuelling') or {}
+        if not refuel.get('enabled', True):
+            return
+
+        try:
+            lbs = int(data.get('lbs') or 0)
+        except (TypeError, ValueError):
+            return
+        if lbs <= 0:
+            return
+
+        player = cast(CreditPlayer, server.get_player(name=data.get('name'), active=True))
+        if not player:
+            self.log.debug(f"JSH Credits: refuelling for unknown player {data.get('name')}")
+            return
+
+        block = max(1, int(refuel.get('block_lbs', 1000)))
+        per_block = int(refuel.get('credits_per_block', 2))
+        minimum = max(0, int(refuel.get('minimum_lbs', 500)))
+        cap = max(0, int(refuel.get('max_lbs_per_sortie', 0)))
+
+        if lbs < minimum:
+            return
+
+        payable = lbs
+        if cap:
+            # Fuel costs the pilot nothing, so one sortie could otherwise orbit a
+            # tanker, burn it off and tank again indefinitely. The counter rides
+            # in the pending bucket, which is already created, dropped and paid
+            # out on exactly the sortie boundaries this needs.
+            key = self._key(server, player.ucid)
+            async with self.lock:
+                bucket = self.pending.setdefault(key, self._new_bucket())
+                already = bucket.get('refuel_lbs', 0)
+                payable = max(0, min(lbs, cap - already))
+                if payable > 0:
+                    bucket['refuel_lbs'] = already + payable
+            if payable <= 0:
+                self.log.debug(f"JSH Credits: {player.name} is at the {cap} lb refuelling "
+                               f"cap for this sortie, {lbs} lbs unpaid")
+                return
+
+        # Whole blocks only, so the rate reads the way it is written: 2 credits
+        # per 1000 lbs pays nothing for the first 999.
+        points = (payable // block) * per_block
+        if points <= 0:
+            return
+
+        await self._hold(server, player, points, refuel.get('label', 'refuelling'),
+                         source='refuel', unit_type=data.get('aircraft') or None)
 
     # ------------------------------------------------------------------
     # earning

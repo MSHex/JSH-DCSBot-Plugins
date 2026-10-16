@@ -1,12 +1,13 @@
 # Plugin "JSH Credits"
 
-Holds the credits a player earns for **kills** during a sortie and pays them out
-only when they land at a friendly airbase or FARP. A sortie that ends badly --
+Holds the credits a player earns for **kills** and **air-to-air refuelling**
+during a sortie and pays them out only when they land at a friendly airbase or
+FARP. A sortie that ends badly --
 crash, eject, pilot death, self-kill, disconnect or slot change -- pays out only
 `death_payout` of what was pending (a quarter by default); the rest is gone.
 A mission ending while the player is airborne drops the bucket entirely.
 
-Kills are all this plugin credits. Mission awards that arrive through
+Kills and refuelling are all this plugin credits. Mission awards that arrive through
 `addUserPoints` -- CSAR rescues, logistics rewards -- are credited by CreditSystem
 and labelled by the plugin that earned them, so each keeps its own `credits_log`
 event. CreditSystem remains the ledger: balances, `credits_log`, achievements,
@@ -71,6 +72,55 @@ entries from most specific to least. A `default` entry matches everything and mu
 come last. Supported keys: `category`, `type` (`Player` or `AI`), `unit_type`,
 `points`, `default`.
 
+## Air-to-air refuelling
+
+DCS names the **receiving** aircraft as the initiator of `S_EVENT_REFUELING` and
+`S_EVENT_REFUELING_STOP`, so the mission script samples the fuel state at connect
+and subtracts at disconnect. `getFuel()` is a fraction of internal capacity and
+`getDesc().fuelMassMax` is that capacity in kilograms, so the difference converts
+straight to pounds.
+
+Two known approximations, neither of which matters for an economy: fuel in
+external tanks sits outside `fuelMassMax`, and the aircraft burns while it
+drinks. Both make the figure conservative.
+
+**The pilot taking the fuel is paid, not the tanker.** Rewarding a human-crewed
+tanker for fuel given away would be a separate feature.
+
+Refuelling is **held like a kill** — collected on landing, reduced to
+`death_payout` if the sortie ends badly. That is the point of this plugin, and it
+also means tanking has to be flown home to be worth anything.
+
+### Setting the rate
+
+Fuel is counted in thousands of pounds, so a rate that reads small per 100 lbs is
+very large per sortie. Against the shipped kill values — 20 for a player
+aircraft, 15 for an AI one, 8 for a helicopter:
+
+| Rate | F-16 top-up (~7,000 lbs) | Worth roughly |
+| --- | --- | --- |
+| 2 per 1000 lbs *(default)* | 14 credits | one AI aircraft |
+| 5 per 1000 lbs | 35 credits | two player aircraft |
+| 1 per 100 lbs | 70 credits | three player aircraft |
+| 5 per 100 lbs | 350 credits | seventeen player aircraft |
+
+Tanking is repeatable and carries no risk, which kills do.
+
+`max_lbs_per_sortie` bounds the obvious exploit: fuel costs the pilot nothing, so
+without it a sortie can orbit a tanker, burn the fuel off in afterburner and tank
+again indefinitely. The counter rides in the pending bucket, so it resets on
+exactly the same boundaries — landing, crash, eject, death, slot change,
+disconnect.
+
+### Foothold pays its own
+
+Foothold has a refuelling reward of its own (`RefuelReward`, 2 credits per
+100 lbs by default) which pays into its **contribution economy** — a different
+ledger from campaign credits, and one that does not feed the Discord rank ladder.
+The two therefore do not double-pay. If you would rather only one ran, set
+`enabled: false` under `refuelling:` for the Foothold instances, or set
+Foothold's `RefuelReward` to 0.
+
 ## Landing validation
 
 `lua/mission.lua` is injected into the running mission at mission load and on
@@ -95,6 +145,7 @@ at that moment. Ships count as landing places, so carrier traps pay out.
 | Event | Effect |
 | --- | --- |
 | `kill` | Hold points for killer and crew (no AI killers, self-kills or team-kills) |
+| `jshCreditsRefuel` | Hold points for fuel taken from a tanker |
 | `addUserPoints` | Clear the unused `deposit` CreditSystem writes; the award itself is not ours |
 | `jshCreditsLanding` | Pay out the pending bucket |
 | `crash`, `eject`, `pilot_death`, `self_kill` | Pay `death_payout` of the bucket, lose the rest |

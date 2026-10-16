@@ -16,6 +16,23 @@ change.
 A pilot the bot has not sent falls through to Foothold's own answer, so an
 unknown player is never worse off than before.
 
+### When ranks are sent
+
+Three triggers, not one. The bot pushes on **connect** (`onPlayerStart`) and on
+**slot change** (`onPlayerChangeSlot`), both after a two-second settle so the
+player row is readable, and then every `refresh_minutes` as a backstop. The
+interval exists only for the case events cannot catch: a pilot earning a
+promotion mid-flight, without connecting or changing slot.
+
+Each push **merges** into the mission's table rather than replacing it. A push
+only carries the pilots the bot can see at that moment, and replacing wholesale
+meant any push that omitted someone still flying — a gap in the player list, a
+slot transition — dropped their rank until the next one, up to
+`refresh_minutes` away. In game that is indistinguishable from the plugin having
+failed: the pilot is just told their rank is insufficient. An empty push is
+ignored outright, since it only means the server is empty. An entry left behind
+for a pilot who has gone costs nothing: it is overwritten when they return.
+
 Since Foothold 5.3.0 `getPlayerRank` takes and returns a second value, the
 pilot's career record, which newer callers thread back in to avoid re-reading
 it. The wrapper always calls through and passes that record back with our
@@ -74,12 +91,45 @@ don't accumulate on every menu refresh.
 | `enabled` | Off by default. Turn it on per instance — only Foothold servers want it. |
 | `refresh_minutes` | How often to re-send ranks while people fly. Credits and playtime both move during a session, so a pilot can be promoted mid-flight. 0 updates only on connect and slot change. |
 | `default_level` | Used for a pilot with no rank yet, and for any rank missing from `rank_map`. |
-| `rank_map` | The Discord ladder has 16 rungs; Foothold's `ShopRankRequirements` goes to 7. This maps one onto the other. Keys are the achievement's `role`, exactly as written in `creditsystem.yaml`. |
+| `rank_map` | Maps the Discord ladder onto Foothold's rank numbers. Keys are the achievement's `role`, exactly as written in `creditsystem.yaml`. See **Matching the two ladders** below. |
 | `level_names` | Optional. Names shown where Foothold would print its own rank name. Several Discord ranks share a level, so these name the band, not the pilot's exact rank. |
 
 An unmapped rank logs a warning and falls back to `default_level` rather than
 locking anyone out of the shop. If you edit the achievements list, check
 `rank_map` still covers every `role`.
+
+## Matching the two ladders
+
+**Foothold has 20 ranks**, Recruit (1) to General of the Air Force (20) — see
+`rankNames` and `rankThresholds` in `zoneCommanderv2.lua`. Earlier versions of
+this README said it stopped at 7; that was wrong, and a `rank_map` built on it
+leaves the top items permanently unbuyable.
+
+Twelve of Foothold's ranks share a name with a Discord rank, so the shipped
+`rank_map` matches by name. That matters because Foothold prints its **own**
+names in shop messages via `getRankName`, so a pilot mapped to 12 is told
+"Captain" and it agrees with their Discord role. The only mismatch is Command
+Chief Master Sergeant, which Foothold has no equivalent for; it shares level 9,
+because giving it its own level would shift all six officer ranks up one and
+make every displayed name wrong.
+
+### Check what your map requires
+
+Two tables set the gates, and they differ per map:
+
+| Table | File | Range |
+| --- | --- | --- |
+| `ShopRankRequirements` | `Foothold Config.lua` | 1–10 on current versions |
+| `CTLDPrices[...].reqRank` | `Foothold CTLD.lua` | 1–3 |
+
+**If your highest mapped level is below a table's highest requirement, those
+items can never be bought by anyone.** On Syria 5.2.0 that was `zpat` and
+`zhimars` (8), `gslot` (9) and `cruisemsl` (10) — four items dead behind a
+`rank_map` that stopped at 7, with no error anywhere to say so.
+
+Worth knowing the reverse too: since nothing gates above 10, every rank above
+Second Lieutenant unlocks nothing new. If you want senior officers to keep
+earning access, raise some `ShopRankRequirements` values into the 11–20 range.
 
 ## Commands (DCS Admin / GameMaster)
 

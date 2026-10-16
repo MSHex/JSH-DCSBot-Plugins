@@ -19,38 +19,51 @@ DEFAULT:
   # Used for a pilot with no rank yet, and for any rank missing from rank_map.
   default_level: 1
 
-  # The Discord ladder in creditsystem.yaml has 16 rungs; Foothold's
-  # ShopRankRequirements only goes to 7. This maps one onto the other.
+  # Maps the Discord ladder in creditsystem.yaml onto Foothold's rank numbers.
   # Keys are the achievement's `role` in creditsystem.yaml, exactly as written.
+  #
+  # Foothold has 20 ranks, Recruit (1) to General of the Air Force (20) -- see
+  # rankNames and rankThresholds in zoneCommanderv2.lua. Twelve of them share a
+  # name with a Discord rank, so the mapping below matches by name. That matters
+  # because Foothold prints its OWN rank names in shop messages (getRankName), so
+  # a pilot at level 12 is told "Captain" and it agrees with Discord.
+  #
+  # The only mismatch is Command Chief Master Sergeant, which Foothold has no
+  # equivalent for. It shares level 9 with Chief Master Sergeant; giving it its
+  # own level would shift every officer up one and make all six displayed names
+  # wrong. Nothing in the game gates above 10, so sharing costs no access.
+  #
+  # Check what YOUR map actually requires before changing these: the gate values
+  # live in ShopRankRequirements in Foothold Config.lua (1-10 on current
+  # versions) and in the CTLDPrices table in Foothold CTLD.lua (1-3). A map
+  # whose highest requirement exceeds your highest mapped level leaves those
+  # items permanently unbuyable by anyone.
   rank_map:
-    Airman Basic (E-1): 1
-    Airman (E-2): 1
-    Airman First Class (E-3): 1
-    Senior Airman (E-4): 1
-    Staff Sergeant (E-5): 2
-    Technical Sergeant (E-6): 2
-    Master Sergeant (E-7): 3
-    Senior Master Sergeant (E-8): 3
-    Chief Master Sergeant (E-9): 4
-    Command Chief Master Sergeant (E-9S): 4
-    Second Lieutenant (O-1): 5
-    First Lieutenant (O-2): 5
-    Captain (O-3): 6
-    Major (O-4): 6
-    Lieutenant Colonel (O-5): 7
-    Colonel (O-6): 7
+    Airman Basic (E-1): 1                  # Recruit
+    Airman (E-2): 2                        # Aviator
+    Airman First Class (E-3): 3            # Airman
+    Senior Airman (E-4): 4                 # Senior Airman
+    Staff Sergeant (E-5): 5                # Staff Sergeant
+    Technical Sergeant (E-6): 6            # Technical Sergeant
+    Master Sergeant (E-7): 7               # Master Sergeant
+    Senior Master Sergeant (E-8): 8        # Senior Master Sergeant
+    Chief Master Sergeant (E-9): 9         # Chief Master Sergeant
+    Command Chief Master Sergeant (E-9S): 9    # shares 9; see above
+    Second Lieutenant (O-1): 10            # Second Lieutenant
+    First Lieutenant (O-2): 11             # First Lieutenant
+    Captain (O-3): 12                      # Captain
+    Major (O-4): 13                        # Major
+    Lieutenant Colonel (O-5): 14           # Lieutenant Colonel
+    Colonel (O-6): 15                      # Colonel
 
-  # Optional. Names shown where Foothold would print its own rank name. Several
-  # Discord ranks share one level, so these name the band rather than the
+  # Optional, and unnecessary with a name-matched rank_map: Foothold's own names
+  # already agree with Discord. Only worth setting if you compress several
+  # Discord ranks onto one level, where these name the band rather than the
   # pilot's exact rank. Leave it out to keep Foothold's names.
   # level_names:
   #   '1': Enlisted
-  #   '2': NCO
-  #   '3': Senior NCO
-  #   '4': Chief
-  #   '5': Junior Officer
-  #   '6': Field Officer
-  #   '7': Senior Officer
+  #   '5': NCO
+  #   '10': Officer
 
 # ---------------------------------------------------------------- per instance
 # Turn it on only for the Foothold servers:

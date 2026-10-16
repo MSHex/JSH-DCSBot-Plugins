@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS jsh_credits_events (
     id              SERIAL PRIMARY KEY,
     instance        TEXT NOT NULL,       -- DCSServerBot instance name
     player_ucid     TEXT NOT NULL,
-    source          TEXT NOT NULL DEFAULT 'kill',   -- 'kill' or 'mission'
+    source          TEXT NOT NULL DEFAULT 'kill',   -- 'kill', 'refuel' or 'mission'
     unit_type       TEXT,                           -- victim unit type, kills only
     category        TEXT,                           -- victim category, kills only
     reason          TEXT,                           -- award reason, mission only

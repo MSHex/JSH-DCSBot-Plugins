@@ -81,6 +81,48 @@ DEFAULT:
   # readable. The column itself is TEXT and has no limit.
   remark_max_length: 200
 
+  # ---------------------------------------------------------------- refuelling
+  #
+  # Credits for fuel taken from a tanker, measured by the mission and held like
+  # a kill -- collected on landing, and subject to death_payout above if the
+  # sortie ends badly. The pilot TAKING the fuel is paid, not the tanker.
+
+  refuelling:
+    enabled: true
+
+    # Paid in whole blocks: 2 credits per 1000 lbs pays 2 at 1000-1999 lbs, 4 at
+    # 2000-2999, nothing below 1000. A partial block is never rounded up.
+    #
+    # CHECK THIS AGAINST points_per_kill BELOW BEFORE RAISING IT. Fuel is
+    # counted in thousands of pounds, so a rate that looks small per 100 lbs is
+    # very large per sortie. Against the kill values further down -- 20 for a
+    # player aircraft, 15 for an AI one, 8 for a helicopter:
+    #
+    #   rate               F-16 top-up (~7,000 lbs)   worth roughly
+    #   2 per 1000 lbs     14 credits                 one AI aircraft
+    #   5 per 1000 lbs     35 credits                 two player aircraft
+    #   1 per 100 lbs      70 credits                 three player aircraft
+    #   5 per 100 lbs     350 credits                 seventeen player aircraft
+    #
+    # Tanking is repeatable and carries no risk, which kills do.
+    block_lbs: 1000
+    credits_per_block: 2
+
+    # Transfers below this earn nothing, so brushing the basket on the way past
+    # is not worth credits. 0 pays everything above one whole block.
+    minimum_lbs: 500
+
+    # Most pounds that can be PAID FOR in one sortie. Fuel costs the pilot
+    # nothing, so without a cap a sortie can orbit a tanker, burn the fuel off
+    # in afterburner and tank again indefinitely. The counter resets whenever
+    # the pending bucket does: on landing, crash, eject, death, slot change or
+    # disconnect. 0 removes the cap.
+    max_lbs_per_sortie: 20000
+
+    # How it reads in the `held` message and in the RTB remark, e.g.
+    # "RTB Al-Asad Airbase: kills (86: 3x Su-27), refuelling (14: 1x F-16C_50)"
+    label: refuelling
+
   # -------------------------------------------------------------- kill scoring
   #
   # Evaluated top to bottom; the FIRST entry that matches wins. Order from most

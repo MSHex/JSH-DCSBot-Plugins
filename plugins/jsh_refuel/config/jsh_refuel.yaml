@@ -1,0 +1,68 @@
+# Copy to <bot>/config/plugins/jsh_refuel.yaml on BOTH nodes.
+#
+# DEFAULT applies to every server. A section named after an instance (the names
+# under "instances:" in nodes.yaml, not the server names in servers.yaml)
+# overrides DEFAULT for that server only.
+#
+# Everything here is read at payout time, so changing the rate takes effect on
+# the next refuelling -- no bot restart, no DCS restart.
+
+DEFAULT:
+
+  # false disables the plugin on a server: nothing measured, nothing paid.
+  enabled: true
+
+  # ------------------------------------------------------------------ the rate
+  #
+  # Paid in whole blocks: 2 credits per 1000 lbs pays 2 at 1000-1999 lbs, 4 at
+  # 2000-2999, and nothing below 1000. A partial block is never rounded up.
+  #
+  # CHECK THIS AGAINST YOUR KILL VALUES BEFORE RAISING IT. Fuel is measured in
+  # thousands of pounds, so a rate that looks small per 100 lbs is very large
+  # per sortie. Against the jsh_credits defaults -- 20 for a player aircraft,
+  # 15 for an AI one, 8 for a helicopter:
+  #
+  #   rate                  F-16 top-up (~7,000 lbs)   worth roughly
+  #   2 per 1000 lbs        14 credits                 one AI aircraft
+  #   5 per 1000 lbs        35 credits                 two player aircraft
+  #   1 per 100 lbs         70 credits                 three player aircraft
+  #   5 per 100 lbs        350 credits                 seventeen player aircraft
+  #
+  # Tanking is also repeatable and risk-free, which kills are not.
+  block_lbs: 1000
+  credits_per_block: 2
+
+  # Transfers below this are recorded but not paid, so a nudge against the
+  # basket on the way past is not worth credits. Set 0 to pay everything.
+  minimum_lbs: 500
+
+  # Most pounds that can be PAID for in one sortie. A pilot who burns fuel in
+  # afterburner and re-tanks can otherwise farm this indefinitely, since the
+  # fuel itself costs them nothing. The counter resets on slot change, death,
+  # eject, crash and disconnect -- a new airframe is a new sortie.
+  # 0 removes the cap.
+  max_lbs_per_sortie: 20000
+
+  # ---------------------------------------------------------------- reporting
+  # Tells the pilot what they earned, in-game, when the boom comes out.
+  announce_in_game: true
+
+  # credits_log event name. Keep this distinct from every other credit writer
+  # -- see the "who writes credits" table in the repository README.
+  credits_log_event: refuel
+
+# ------------------------------------------------------------- per instance
+# Instance names, NOT server names. Check config/nodes.yaml for yours.
+#
+# Foothold pays its own refuelling reward into its own economy (RefuelReward in
+# the Foothold config). That is a separate ledger from campaign credits, so the
+# two do not double-pay -- but if you would rather only one of them ran, turn
+# this off on the Foothold servers, or set Foothold's RefuelReward to 0.
+#
+# DCS.Foothold:
+#   enabled: false
+#
+# Or make fuel worth more on a long-range map:
+#
+# DCS.dcs_serverrelease:
+#   credits_per_block: 8

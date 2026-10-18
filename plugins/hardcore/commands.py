@@ -56,7 +56,7 @@ class Hardcore(Plugin[HardcoreEventListener]):
             return
 
         data = await self.economy.status_for(server, ucid)
-        mode = "🔥 HARDCORE (+50%)" if data["hardcore"] else "🛡️ NORMAL"
+        mode = "🔥 HARDCORE (aircraft bonus only)" if data["hardcore"] else "🛡️ NORMAL"
 
         embed = discord.Embed(title="✈️ Pilot Economy Profile", color=discord.Color.blue())
         embed.add_field(name="Pilot", value=interaction.user.display_name, inline=True)
@@ -64,15 +64,19 @@ class Hardcore(Plugin[HardcoreEventListener]):
         embed.add_field(name="Campaign", value=data["campaign_name"] or "No active campaign", inline=False)
         embed.add_field(name="Bank Balance", value=f'{data["balance"]:,} cr', inline=True)
 
+        embed.add_field(name="First ejection allowance", value=("Used" if data["ejections_used"] else "Available") if data["hardcore"] else "Not enrolled", inline=True)
+        embed.add_field(name="Support rewards", value="Normal rate; no Hardcore bonus", inline=True)
         session = data["session"]
         if session:
             m, s = divmod(session["eligible_seconds"], 60)
             embed.add_field(name="Current Eligible Time", value=f"{m}m {s}s", inline=True)
+            embed.add_field(name="Aircraft / Support", value=f"{session['aircraft_seconds'] // 60}m / {session['support_seconds'] // 60}m", inline=True)
+            embed.add_field(name="Ground protection", value=session.get('protection_place') if session.get('protected') else "Not protected / unverified", inline=True)
             embed.add_field(name="Current Losses", value=str(session["deaths"]), inline=True)
             if session["hardcore_revoked"]:
                 embed.add_field(
                     name="Session Notice",
-                    value="Hardcore was revoked during this session; the whole session settles at Normal rate.",
+                    value="Hardcore was revoked during this session; aircraft earnings settle at Normal rate; support always uses Normal rate.",
                     inline=False
                 )
 

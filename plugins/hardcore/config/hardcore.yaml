@@ -1,0 +1,40 @@
+DEFAULT:
+  enabled: false
+  buyin_fee: 500
+  block_minutes: 15
+  normal_reward: 25
+  hardcore_reward: 37.5
+  death_penalties:
+    0: 0
+    1: 20
+    2: 50
+    3: 90
+  dm_receipt: true
+
+  # Observers/spectators are deliberately excluded. These special slots earn
+  # normal_reward, including players enrolled in Hardcore.
+  support_roles:
+    - instructor
+    - artillery_commander
+    - forward_observer
+    - game-master
+    - gamemaster
+
+  # Friendly = current facility coalition matches player's coalition.
+  # Airfields use the footprint of runway/parking geometry + this margin.
+  airfield_margin_m: 75
+  farp_radius_m: 150
+  # Optional exact airbase name -> CIRCULAR mission trigger-zone name.
+  # Overrides the default land-base boundary, never coalition/ground checks.
+  # Carrier protection always uses the ship-local deck footprint.
+  protection_zones: {}
+  # Example:
+  # protection_zones:
+  #   Kobuleti: Hardcore_Kobuleti
+
+  evidence_max_age_seconds: 5
+  incident_merge_seconds: 3
+
+# Exact DCSServerBot INSTANCE name, not displayed multiplayer name.
+"DCS.dcs_serverrelease":
+  enabled: true

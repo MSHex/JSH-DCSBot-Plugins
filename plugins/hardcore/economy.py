@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import math
+import json
+from psycopg.rows import dict_row
+from .policy import earnings, loss_decision
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional, TYPE_CHECKING, cast
+from typing import Optional, TYPE_CHECKING
 
 import discord
 
@@ -34,6 +36,12 @@ class Settlement:
     carry_half_units: int
     old_balance: int
     new_balance: int
+    aircraft_seconds: int
+    support_seconds: int
+    aircraft_half: int
+    support_half: int
+    events: dict
+    ejections_used: int
 
 
 class EconomyService:
@@ -48,8 +56,6 @@ class EconomyService:
     Native DCSServerBot credits remain INTEGER. Any 0.5 remainder is carried
     in hardcore_wallet_carry and applied to the player's next settlement.
     """
-
-    LOSS_DEBOUNCE_SECONDS = 10
 
     def __init__(self, plugin: "Hardcore"):
         self.plugin = plugin
@@ -84,7 +90,8 @@ class EconomyService:
                 ON CONFLICT (player_ucid) DO UPDATE
                 SET active = EXCLUDED.active,
                     changed_at = EXCLUDED.changed_at,
-                    changed_by = EXCLUDED.changed_by
+                    changed_by = EXCLUDED.changed_by,
+                    ejections_used = CASE WHEN EXCLUDED.active AND NOT hardcore_status.active THEN 0 ELSE hardcore_status.ejections_used END
             """, (ucid, active, changed_by))
 
     async def get_balance(self, campaign_id: int, ucid: str) -> int:
@@ -164,7 +171,8 @@ class EconomyService:
                     ON CONFLICT (player_ucid) DO UPDATE
                     SET active = TRUE,
                         changed_at = EXCLUDED.changed_at,
-                        changed_by = EXCLUDED.changed_by
+                        changed_by = EXCLUDED.changed_by,
+                        ejections_used = 0
                 """, (ucid, changed_by))
 
         self._sync_live_player_balance(server, ucid, new_balance)
@@ -236,437 +244,234 @@ class EconomyService:
                 """, (server.name, ucid, campaign_id, player_name, hardcore))
                 return int((await cursor.fetchone())[0])
 
-    async def start_segment(self, server: Server, ucid: str, player_name: str) -> None:
-        session_id = await self.open_session(server, ucid, player_name)
-        if not session_id:
+    @staticmethod
+    async def _close_segment(conn, session_id, cutoff=None):
+        await conn.execute("""
+            UPDATE hardcore_sessions SET
+                aircraft_seconds = aircraft_seconds + CASE WHEN segment_role = 'aircraft'
+                    AND segment_started_at IS NOT NULL THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM
+                    (COALESCE(%s::timestamp, timezone('utc', clock_timestamp())) - segment_started_at))))::bigint ELSE 0 END,
+                support_seconds = support_seconds + CASE WHEN segment_role = 'support'
+                    AND segment_started_at IS NOT NULL THEN GREATEST(0, FLOOR(EXTRACT(EPOCH FROM
+                    (COALESCE(%s::timestamp, timezone('utc', clock_timestamp())) - segment_started_at))))::bigint ELSE 0 END,
+                segment_started_at = NULL
+            WHERE id = %s
+        """, (cutoff, cutoff, session_id))
+        await conn.execute('UPDATE hardcore_sessions SET eligible_seconds = aircraft_seconds + support_seconds WHERE id = %s', (session_id,))
+
+    async def observe(self, server, ucid, name, data):
+        role = data.get('role', 'spectator')
+        if role not in {'aircraft', 'support', 'spectator'}:
             return
+        if role != 'spectator':
+            await self.open_session(server, ucid, name)
         async with self.apool.connection() as conn:
-            await conn.execute("""
-                UPDATE hardcore_sessions
-                SET segment_started_at = COALESCE(segment_started_at, (NOW() AT TIME ZONE 'utc')),
-                    last_seen_at = (NOW() AT TIME ZONE 'utc')
-                WHERE id = %s AND settled = FALSE
-            """, (session_id,))
-
-    async def pause_segment(self, server: Server, ucid: str) -> None:
-        async with self.apool.connection() as conn:
-            await conn.execute("""
-                UPDATE hardcore_sessions
-                SET eligible_seconds = eligible_seconds +
-                    CASE
-                        WHEN segment_started_at IS NULL THEN 0
-                        ELSE GREATEST(
-                            0,
-                            FLOOR(EXTRACT(EPOCH FROM (
-                                (NOW() AT TIME ZONE 'utc') - segment_started_at
-                            )))::BIGINT
-                        )
-                    END,
-                    segment_started_at = NULL,
-                    airborne = FALSE,
-                    last_seen_at = (NOW() AT TIME ZONE 'utc')
-                WHERE server_name = %s AND player_ucid = %s AND settled = FALSE
-            """, (server.name, ucid))
-
-    async def set_airborne(self, server: Server, ucid: str, airborne: bool) -> None:
-        async with self.apool.connection() as conn:
-            await conn.execute("""
-                UPDATE hardcore_sessions
-                SET airborne = %s,
-                    last_seen_at = (NOW() AT TIME ZONE 'utc')
-                WHERE server_name = %s AND player_ucid = %s AND settled = FALSE
-            """, (airborne, server.name, ucid))
-
-    async def is_airborne(self, server: Server, ucid: str) -> bool:
-        async with self.apool.connection() as conn:
-            cursor = await conn.execute("""
-                SELECT airborne
-                FROM hardcore_sessions
-                WHERE server_name = %s AND player_ucid = %s AND settled = FALSE
-            """, (server.name, ucid))
-            row = await cursor.fetchone()
-            return bool(row and row[0])
-
-    async def record_loss(self, server: Server, ucid: str, reason: str) -> bool:
-        """
-        Record one loss incident. Returns True if a new loss was counted.
-        crash/pilot_death/eject commonly arrive close together, so events within
-        LOSS_DEBOUNCE_SECONDS are coalesced into one incident.
-        """
-        async with self.apool.connection() as conn:
-            async with conn.transaction():
-                cursor = await conn.execute("""
-                    SELECT id, deaths, hardcore_at_start, hardcore_revoked,
-                           EXTRACT(EPOCH FROM (
-                               (NOW() AT TIME ZONE 'utc') - last_loss_at
-                           ))
-                    FROM hardcore_sessions
-                    WHERE server_name = %s AND player_ucid = %s AND settled = FALSE
-                    FOR UPDATE
-                """, (server.name, ucid))
-                row = await cursor.fetchone()
+            async with conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute('SELECT * FROM hardcore_sessions WHERE server_name=%s AND player_ucid=%s AND NOT settled FOR UPDATE', (server.name, ucid))
+                row = await cur.fetchone()
                 if not row:
-                    return False
-
-                session_id, deaths, hc_start, hc_revoked, age = row
-                if age is not None and float(age) < self.LOSS_DEBOUNCE_SECONDS:
-                    return False
-
-                new_deaths = int(deaths) + 1
-                revoke = bool(hc_start and not hc_revoked)
-
+                    return
+                if row['telemetry_epoch'] == data['epoch'] and row['telemetry_seq'] >= int(data['seq']):
+                    return
+                if row['segment_role'] != role:
+                    await self._close_segment(conn, row['id'])
                 await conn.execute("""
-                    UPDATE hardcore_sessions
-                    SET deaths = %s,
-                        hardcore_revoked = hardcore_revoked OR %s,
-                        airborne = FALSE,
-                        last_loss_at = (NOW() AT TIME ZONE 'utc'),
-                        last_loss_reason = %s,
-                        last_seen_at = (NOW() AT TIME ZONE 'utc')
-                    WHERE id = %s
-                """, (new_deaths, revoke, reason, session_id))
+                    UPDATE hardcore_sessions SET segment_role=%s,
+                        segment_started_at = CASE WHEN %s='spectator' THEN NULL
+                            ELSE COALESCE(segment_started_at, timezone('utc', clock_timestamp())) END,
+                        airborne=%s, protected=%s, protection_place=%s,
+                        telemetry_at=timezone('utc', clock_timestamp()), last_seen_at=timezone('utc', clock_timestamp()),
+                        telemetry_seq=%s, telemetry_epoch=%s
+                    WHERE id=%s
+                """, (role, role, data.get('airborne') is True, data.get('protected'), data.get('place'),
+                      data['seq'], data['epoch'], row['id']))
 
-                await conn.execute("""
-                    INSERT INTO hardcore_events (session_id, event_type, details)
-                    VALUES (%s, 'loss', %s)
-                """, (session_id, reason))
-
-                if revoke:
-                    await conn.execute("""
-                        INSERT INTO hardcore_status (player_ucid, active, changed_at, changed_by)
-                        VALUES (%s, FALSE, (NOW() AT TIME ZONE 'utc'), 'LOSS')
-                        ON CONFLICT (player_ucid) DO UPDATE
-                        SET active = FALSE,
-                            changed_at = EXCLUDED.changed_at,
-                            changed_by = 'LOSS'
-                    """, (ucid,))
-
-        return True
-
-    @staticmethod
-    def penalty_percent(deaths: int, config: dict) -> int:
-        penalties = config.get("death_penalties", {})
-        if deaths <= 0:
-            return int(penalties.get(0, penalties.get("0", 0)))
-        if deaths == 1:
-            return int(penalties.get(1, penalties.get("1", 20)))
-        if deaths == 2:
-            return int(penalties.get(2, penalties.get("2", 50)))
-        return int(penalties.get(3, penalties.get("3", 90)))
-
-    @staticmethod
-    def _reward_to_half_units(value) -> int:
-        # Values must resolve exactly to half-credit increments.
-        return int(round(float(value) * 2))
-
-    async def settle(self, server: Server, ucid: str) -> Optional[Settlement]:
-        config = self.cfg(server)
-        block_minutes = int(config.get("block_minutes", 15))
-        if block_minutes <= 0:
-            raise ValueError("block_minutes must be > 0")
-        block_seconds = block_minutes * 60
-
+    async def pause_segment(self, server, ucid):
         async with self.apool.connection() as conn:
             async with conn.transaction():
-                cursor = await conn.execute("""
-                    SELECT id, campaign_id, COALESCE(player_name, player_ucid),
-                           eligible_seconds,
-                           segment_started_at,
-                           deaths,
-                           hardcore_at_start,
-                           hardcore_revoked
-                    FROM hardcore_sessions
-                    WHERE server_name = %s AND player_ucid = %s AND settled = FALSE
-                    FOR UPDATE
-                """, (server.name, ucid))
-                row = await cursor.fetchone()
+                cur = await conn.execute('SELECT id FROM hardcore_sessions WHERE server_name=%s AND player_ucid=%s AND NOT settled FOR UPDATE', (server.name, ucid))
+                row = await cur.fetchone()
+                if row:
+                    await self._close_segment(conn, row[0])
+                    await conn.execute("UPDATE hardcore_sessions SET segment_role='spectator', airborne=FALSE WHERE id=%s", (row[0],))
+
+    async def record_incident(self, server, ucid, data):
+        kind = data.get('kind')
+        if kind not in {'ejection', 'death', 'reslot'}:
+            return False
+        event_key = f"{server.name}:{data['epoch']}:{data['seq']}:{ucid}"
+        spawn_key = f"{server.name}:{data['epoch']}:{data['spawn']}"
+        protected = data.get('protected')
+        if protected not in (True, False):
+            protected = None
+        async with self.apool.connection() as conn:
+            async with conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute('SELECT * FROM hardcore_sessions WHERE server_name=%s AND player_ucid=%s AND NOT settled FOR UPDATE', (server.name, ucid))
+                session = await cur.fetchone()
+                if not session:
+                    return False
+                # One terminal incident per aircraft incarnation and crew member,
+                # including across a reconnect. Safe reslots are not terminal.
+                await cur.execute("""
+                    SELECT 1 FROM hardcore_events e JOIN hardcore_sessions s ON s.id=e.session_id
+                    WHERE s.player_ucid=%s AND e.spawn_key=%s
+                    AND (e.event_type IN ('ejection','death') OR (e.event_type='reslot' AND e.counted))
+                """, (ucid, spawn_key))
+                if await cur.fetchone():
+                    return False
+                await cur.execute('SELECT active,ejections_used FROM hardcore_status WHERE player_ucid=%s FOR UPDATE', (ucid,))
+                status = await cur.fetchone() or {'active': False, 'ejections_used': 0}
+                count, revoke, used = loss_decision(kind, protected, status['active'], status['ejections_used'])
+                await cur.execute("""
+                    INSERT INTO hardcore_events(session_id,event_type,details,event_key,spawn_key,protected,counted)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING id
+                """, (session['id'], kind, json.dumps(data, ensure_ascii=False), event_key, spawn_key, protected, count))
+                if not await cur.fetchone():
+                    return False
+                if count:
+                    await conn.execute("""
+                        UPDATE hardcore_sessions SET deaths=deaths+1,
+                            hardcore_revoked=hardcore_revoked OR %s,
+                            last_loss_at=timezone('utc',clock_timestamp()),last_loss_reason=%s
+                        WHERE id=%s
+                    """, (revoke, kind, session['id']))
+                if status['active'] and count:
+                    await conn.execute("""
+                        UPDATE hardcore_status SET active=%s,ejections_used=%s,
+                            changed_at=CASE WHEN %s THEN timezone('utc',clock_timestamp()) ELSE changed_at END,
+                            changed_by=CASE WHEN %s THEN %s ELSE changed_by END WHERE player_ucid=%s
+                    """, (not revoke, used, revoke, revoke, kind.upper(), ucid))
+                if kind != 'reslot':
+                    # Do not close the new aircraft's reward clock for an old delayed death.
+                    if data.get('current', True):
+                        await self._close_segment(conn, session['id'])
+                        await conn.execute("UPDATE hardcore_sessions SET segment_role='spectator' WHERE id=%s", (session['id'],))
+        self.log.info('Hardcore incident | pilot=%s | ucid=%s | kind=%s | protected=%s | counted=%s | revoked=%s | place=%s',
+                      session['player_name'], ucid, kind, protected, count, revoke, data.get('place'))
+        return count
+
+    @staticmethod
+    def penalty_percent(deaths, config):
+        levels = {int(k): int(v) for k, v in config.get('death_penalties', {0: 0, 1: 20, 2: 50, 3: 90}).items()}
+        return levels[max((k for k in levels if k <= deaths), default=min(levels))]
+
+    async def settle(self, server, ucid):
+        cfg = self.cfg(server)
+        async with self.apool.connection() as conn:
+            async with conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute('SELECT * FROM hardcore_sessions WHERE server_name=%s AND player_ucid=%s AND NOT settled FOR UPDATE', (server.name, ucid))
+                row = await cur.fetchone()
                 if not row:
                     return None
-
-                (
-                    session_id, campaign_id, player_name, eligible_seconds,
-                    segment_started_at, deaths, hc_start, hc_revoked
-                ) = row
-
-                total_seconds = int(eligible_seconds)
-                if segment_started_at is not None:
-                    cursor = await conn.execute("""
-                        SELECT GREATEST(
-                            0,
-                            FLOOR(EXTRACT(EPOCH FROM (
-                                (NOW() AT TIME ZONE 'utc') - %s
-                            )))::BIGINT
-                        )
-                    """, (segment_started_at,))
-                    total_seconds += int((await cursor.fetchone())[0])
-
-                blocks = total_seconds // block_seconds
-
-                # A revoked Hardcore session is repriced entirely at Normal rate.
-                hardcore_rate_applies = bool(hc_start and not hc_revoked)
-                rate = (
-                    config.get("hardcore_reward", 37.5)
-                    if hardcore_rate_applies
-                    else config.get("normal_reward", 25)
-                )
-                rate_half_units = self._reward_to_half_units(rate)
-                gross_half_units = int(blocks * rate_half_units)
-
-                penalty = self.penalty_percent(int(deaths), config)
-                # Integer math; floor to half-credit units after percentage.
-                net_half_units = (gross_half_units * (100 - penalty)) // 100
-
-                cursor = await conn.execute("""
-                    SELECT half_credit_units
-                    FROM hardcore_wallet_carry
-                    WHERE campaign_id = %s AND player_ucid = %s
-                    FOR UPDATE
-                """, (campaign_id, ucid))
-                carry_row = await cursor.fetchone()
-                carry = int(carry_row[0]) if carry_row else 0
-
-                combined_half_units = net_half_units + carry
-                payout = combined_half_units // 2
-                new_carry = combined_half_units % 2
-
-                cursor = await conn.execute("""
-                    SELECT points
-                    FROM credits
-                    WHERE campaign_id = %s AND player_ucid = %s
-                    FOR UPDATE
-                """, (campaign_id, ucid))
-                credit_row = await cursor.fetchone()
-                old_balance = int(credit_row[0]) if credit_row else 0
-                new_balance = old_balance + payout
-
-                # Respect CreditSystem's configured maximum if present.
-                credit_plugin = self.bot.cogs.get("CreditSystem")
-                if credit_plugin:
-                    credit_cfg = credit_plugin.get_config(server)
-                    if "max_points" in credit_cfg:
-                        new_balance = min(new_balance, int(credit_cfg["max_points"]))
-                        payout = max(0, new_balance - old_balance)
-
-                await conn.execute("""
-                    INSERT INTO credits (campaign_id, player_ucid, points)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (campaign_id, player_ucid)
-                    DO UPDATE SET points = EXCLUDED.points
-                """, (campaign_id, ucid, new_balance))
-
+                await self._close_segment(conn, row['id'])
+                await cur.execute('SELECT * FROM hardcore_sessions WHERE id=%s', (row['id'],))
+                row = await cur.fetchone()
+                penalty = self.penalty_percent(row['deaths'], cfg)
+                earned = earnings(row['aircraft_seconds'], row['support_seconds'], cfg.get('block_minutes', 15),
+                                  cfg.get('normal_reward', 25), cfg.get('hardcore_reward', 37.5),
+                                  row['hardcore_at_start'] and not row['hardcore_revoked'], penalty)
+                # Ensure wallets exist before locking, also safe on first-ever credit.
+                await conn.execute('INSERT INTO credits(campaign_id,player_ucid,points) VALUES (%s,%s,0) ON CONFLICT DO NOTHING', (row['campaign_id'], ucid))
+                await cur.execute('SELECT points FROM credits WHERE campaign_id=%s AND player_ucid=%s FOR UPDATE', (row['campaign_id'], ucid))
+                old = (await cur.fetchone())['points']
+                await conn.execute('INSERT INTO hardcore_wallet_carry(campaign_id,player_ucid,half_credit_units) VALUES (%s,%s,0) ON CONFLICT DO NOTHING', (row['campaign_id'], ucid))
+                await cur.execute('SELECT half_credit_units FROM hardcore_wallet_carry WHERE campaign_id=%s AND player_ucid=%s FOR UPDATE', (row['campaign_id'], ucid))
+                carry = (await cur.fetchone())['half_credit_units']
+                payout, carry = divmod(earned.net_half + carry, 2)
+                credit_plugin = self.bot.cogs.get('CreditSystem')
+                maximum = credit_plugin.get_config(server).get('max_points') if credit_plugin else None
+                if maximum is not None:
+                    payout = min(payout, max(0, int(maximum) - old))
+                new = old + payout
+                await conn.execute('UPDATE credits SET points=%s WHERE campaign_id=%s AND player_ucid=%s', (new, row['campaign_id'], ucid))
                 if payout:
-                    await conn.execute("""
-                        INSERT INTO credits_log
-                            (campaign_id, event, player_ucid, old_points, new_points, remark)
-                        VALUES (%s, 'flight economy', %s, %s, %s, %s)
-                    """, (
-                        campaign_id, ucid, old_balance, new_balance,
-                        f"{blocks} x {block_minutes}m block(s), {deaths} loss(es), {penalty}% penalty"
-                    ))
-
+                    await conn.execute("""INSERT INTO credits_log(campaign_id,event,player_ucid,old_points,new_points,remark)
+                        VALUES (%s,'flight economy',%s,%s,%s,%s)""",
+                        (row['campaign_id'], ucid, old, new,
+                         f"Aircraft blocks={earned.aircraft_blocks}; support blocks={earned.support_blocks}; losses={row['deaths']}; aircraft penalty={penalty}%"))
+                await conn.execute('UPDATE hardcore_wallet_carry SET half_credit_units=%s WHERE campaign_id=%s AND player_ucid=%s', (carry, row['campaign_id'], ucid))
+                await cur.execute('SELECT ejections_used FROM hardcore_status WHERE player_ucid=%s', (ucid,))
+                status = await cur.fetchone()
+                used = status['ejections_used'] if status else 0
                 await conn.execute("""
-                    INSERT INTO hardcore_wallet_carry
-                        (campaign_id, player_ucid, half_credit_units)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (campaign_id, player_ucid) DO UPDATE
-                    SET half_credit_units = EXCLUDED.half_credit_units
-                """, (campaign_id, ucid, new_carry))
+                    UPDATE hardcore_sessions SET settled=TRUE,airborne=FALSE,payout=%s,
+                        gross_half_units=%s,aircraft_gross_half_units=%s,support_gross_half_units=%s,
+                        penalty_percent=%s,ejections_used_at_end=%s,settled_at=timezone('utc',clock_timestamp()) WHERE id=%s
+                """, (payout, earned.aircraft_half + earned.support_half, earned.aircraft_half,
+                      earned.support_half, penalty, used, row['id']))
+                await cur.execute('SELECT event_type,protected,counted,COUNT(*) AS n FROM hardcore_events WHERE session_id=%s GROUP BY event_type,protected,counted', (row['id'],))
+                counts = {(e['event_type'], e['protected'], e['counted']): e['n'] for e in await cur.fetchall()}
+        s = Settlement(row['id'], ucid, row['player_name'] or ucid, row['campaign_id'],
+                       row['eligible_seconds'], earned.aircraft_blocks + earned.support_blocks,
+                       row['deaths'], row['hardcore_at_start'], row['hardcore_revoked'],
+                       earned.aircraft_half + earned.support_half, penalty, earned.net_half,
+                       payout, carry, old, new, row['aircraft_seconds'], row['support_seconds'],
+                       earned.aircraft_half, earned.support_half, counts, used)
+        self._sync_live_player_balance(server, ucid, new)
+        self.log.info('Hardcore settlement | pilot=%s | session=%s | aircraft=%ss | support=%ss | losses=%s | payout=%s | revoked=%s',
+                      s.player_name, s.session_id, s.aircraft_seconds, s.support_seconds, s.deaths, payout, s.hardcore_revoked)
+        if cfg.get('dm_receipt', True):
+            await self.send_receipt(s, cfg.get('block_minutes', 15))
+        return s
 
-                await conn.execute("""
-                    UPDATE hardcore_sessions
-                    SET eligible_seconds = %s,
-                        segment_started_at = NULL,
-                        airborne = FALSE,
-                        settled = TRUE,
-                        payout = %s,
-                        gross_half_units = %s,
-                        penalty_percent = %s,
-                        settled_at = (NOW() AT TIME ZONE 'utc'),
-                        last_seen_at = (NOW() AT TIME ZONE 'utc')
-                    WHERE id = %s
-                """, (
-                    total_seconds, payout, gross_half_units,
-                    penalty, session_id
-                ))
-
-        self._sync_live_player_balance(server, ucid, new_balance)
-
-        settlement = Settlement(
-            session_id=int(session_id),
-            player_ucid=ucid,
-            player_name=str(player_name),
-            campaign_id=int(campaign_id),
-            eligible_seconds=total_seconds,
-            completed_blocks=int(blocks),
-            deaths=int(deaths),
-            hardcore_at_start=bool(hc_start),
-            hardcore_revoked=bool(hc_revoked),
-            gross_half_units=gross_half_units,
-            penalty_percent=penalty,
-            net_half_units=net_half_units,
-            paid_credits=payout,
-            carry_half_units=new_carry,
-            old_balance=old_balance,
-            new_balance=new_balance
-        )
-
-        self.log.info(
-            "Hardcore SETTLEMENT | server=%s | ucid=%s | session=%s | seconds=%s | "
-            "blocks=%s | hc_start=%s | revoked=%s | deaths=%s | gross_half=%s | "
-            "penalty=%s%% | net_half=%s | carry=%s | payout=%s | old=%s | new=%s",
-            server.name, ucid, session_id, total_seconds, blocks, bool(hc_start),
-            bool(hc_revoked), int(deaths), gross_half_units, penalty,
-            net_half_units, new_carry, payout, old_balance, new_balance
-        )
-
-        if blocks > 0 and payout <= 0 and new_balance <= old_balance:
-            self.log.warning(
-                "Hardcore ZERO PAYOUT | server=%s | ucid=%s | session=%s | "
-                "seconds=%s | blocks=%s | deaths=%s | penalty=%s%% | old=%s | new=%s",
-                server.name, ucid, session_id, total_seconds, blocks,
-                int(deaths), penalty, old_balance, new_balance
-            )
-
-        if config.get("dm_receipt", True):
-            await self.send_receipt(settlement, block_minutes)
-
-        return settlement
-
-    async def send_receipt(self, s: Settlement, block_minutes: int) -> None:
+    async def send_receipt(self, s, block_minutes):
         member = await self.bot.get_member_by_ucid(s.player_ucid)
         if not member:
             return
-
-        minutes, seconds = divmod(s.eligible_seconds, 60)
-        gross = s.gross_half_units / 2
-        net = s.net_half_units / 2
-
+        mode = 'Hardcore → Normal (revoked)' if s.hardcore_revoked else ('Hardcore retained' if s.hardcore_at_start else 'Normal')
         if s.hardcore_at_start and not s.hardcore_revoked:
-            mode = "🔥 Hardcore"
-        elif s.hardcore_at_start and s.hardcore_revoked:
-            mode = "🔥 Hardcore → 🛡️ Normal (revoked)"
-        else:
-            mode = "🛡️ Normal"
-
-        embed = discord.Embed(
-            title="✈️ Dynamic Campaign Flight Receipt",
-            color=discord.Color.blue()
-        )
-        embed.add_field(name="Pilot", value=s.player_name, inline=False)
-        embed.add_field(name="Mode", value=mode, inline=False)
-        embed.add_field(name="Eligible Time", value=f"{minutes}m {seconds}s", inline=True)
-        embed.add_field(name="Billable Blocks", value=f"{s.completed_blocks} × {block_minutes}m", inline=True)
-        embed.add_field(name="Losses", value=str(s.deaths), inline=True)
-        embed.add_field(name="Gross", value=f"{gross:g} cr", inline=True)
-        embed.add_field(name="Penalty", value=f"-{s.penalty_percent}%", inline=True)
-        embed.add_field(name="Net Earned", value=f"{net:g} cr", inline=True)
-        embed.add_field(name="Deposited", value=f"{s.paid_credits} cr", inline=True)
-        embed.add_field(name="Previous Balance", value=f"{s.old_balance:,} cr", inline=True)
-        if s.carry_half_units:
-            embed.add_field(name="Fractional Carry", value="0.5 cr", inline=True)
-        embed.add_field(name="New Balance", value=f"{s.new_balance:,} cr", inline=False)
-
+            mode += ' — first ejection allowance ' + ('used' if s.ejections_used else 'available')
+        def count(kind, protected=None, counted=None):
+            return sum(n for (k,p,c),n in s.events.items() if k == kind and (protected is None or p == protected) and (counted is None or c == counted))
+        embed = discord.Embed(title='Campaign Session Receipt', color=discord.Color.blue())
+        embed.add_field(name='Pilot', value=s.player_name, inline=False)
+        embed.add_field(name='Mode', value=mode, inline=False)
+        embed.add_field(name='Aircraft participation', value=f'{s.aircraft_seconds // 60}m {s.aircraft_seconds % 60}s\nGross: {s.aircraft_half / 2:g} cr', inline=True)
+        embed.add_field(name='Support participation · Normal rate', value=f'{s.support_seconds // 60}m {s.support_seconds % 60}s\nGross: {s.support_half / 2:g} cr', inline=True)
+        embed.add_field(name='Deaths / crashes and ejections', value=(
+            f"Deaths/crashes: {count('death', counted=True)} counted · {count('death', protected=True)} protected\n"
+            f"Ejections: {count('ejection', counted=True)} counted · {count('ejection', protected=True)} protected"), inline=False)
+        embed.add_field(name='Reslots / respawns', value=f"{count('reslot', counted=True)} unprotected · {count('reslot', protected=True)} friendly-ground safe", inline=False)
+        unknown = sum(n for (k,p,c),n in s.events.items() if p is None)
+        if unknown:
+            embed.add_field(name='Unverified incidents', value=f'{unknown} — logged without automatic penalty', inline=False)
+        embed.add_field(name='Payout', value=f'Counted losses: {s.deaths}\nAircraft deduction: {s.penalty_percent}%\nSupport deduction: 0%\nNet earned: {s.net_half_units / 2:g} cr\nDeposited: {s.paid_credits} cr', inline=False)
+        embed.add_field(name='Campaign balance', value=f'{s.old_balance:,} → {s.new_balance:,} cr', inline=False)
+        embed.set_footer(text=f'Complete {block_minutes}-minute blocks per category; fractional carry: {s.carry_half_units / 2:g} cr')
         try:
             await member.send(embed=embed)
         except (discord.Forbidden, discord.HTTPException):
-            self.log.warning("Hardcore: could not DM settlement receipt to UCID %s", s.player_ucid)
+            self.log.warning('Hardcore: could not DM receipt for %s', s.player_name)
 
-    async def status_for(self, server: Server, ucid: str) -> dict:
+    async def status_for(self, server, ucid):
         campaign_id, campaign_name = await self.running_campaign(server)
-        balance = await self.get_balance(campaign_id, ucid) if campaign_id else 0
-        active = await self.is_hardcore(ucid)
-
         async with self.apool.connection() as conn:
-            cursor = await conn.execute("""
-                SELECT eligible_seconds,
-                       segment_started_at,
-                       deaths,
-                       hardcore_at_start,
-                       hardcore_revoked,
-                       airborne
-                FROM hardcore_sessions
-                WHERE server_name = %s AND player_ucid = %s AND settled = FALSE
-            """, (server.name, ucid))
-            row = await cursor.fetchone()
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute('SELECT active,ejections_used FROM hardcore_status WHERE player_ucid=%s', (ucid,))
+                status = await cur.fetchone() or {'active': False, 'ejections_used': 0}
+                await cur.execute('SELECT * FROM hardcore_sessions WHERE server_name=%s AND player_ucid=%s AND NOT settled', (server.name, ucid))
+                session = await cur.fetchone()
+        if session:
+            if session['segment_started_at'] and session['segment_role'] in ('aircraft','support'):
+                elapsed = max(0,int((datetime.now(timezone.utc).replace(tzinfo=None) - session['segment_started_at']).total_seconds()))
+                session[session['segment_role'] + '_seconds'] += elapsed
+            session['eligible_seconds'] = session['aircraft_seconds'] + session['support_seconds']
+        return {'campaign_id': campaign_id, 'campaign_name': campaign_name,
+                'balance': await self.get_balance(campaign_id, ucid) if campaign_id else 0,
+                'hardcore': status['active'], 'ejections_used': status['ejections_used'], 'session': session}
 
-        session = None
-        if row:
-            eligible_seconds, segment_started_at, deaths, hc_start, hc_revoked, airborne = row
-            seconds = int(eligible_seconds)
-            if segment_started_at is not None:
-                now = datetime.now(timezone.utc).replace(tzinfo=None)
-                seconds += max(0, int((now - segment_started_at).total_seconds()))
-            session = {
-                "eligible_seconds": seconds,
-                "deaths": int(deaths),
-                "hardcore_at_start": bool(hc_start),
-                "hardcore_revoked": bool(hc_revoked),
-                "airborne": bool(airborne),
-            }
-
-        return {
-            "campaign_id": campaign_id,
-            "campaign_name": campaign_name,
-            "balance": balance,
-            "hardcore": active,
-            "session": session,
-        }
-
-    async def reconcile_server(self, server: Server) -> None:
-        """
-        Called after DCSServerBot registers/re-registers a DCS server.
-
-        For open sessions belonging to players that are no longer connected,
-        stop the open segment at last_seen_at and settle conservatively.
-        For players still connected, resume time from 'now' rather than awarding
-        bot/DCS downtime.
-        """
-        if not self.enabled(server):
-            return
-
-        active_ucids = {p.ucid for p in server.get_active_players() if getattr(p, "ucid", None)}
-        stale_to_settle: list[str] = []
-
+    async def reconcile_server(self, server):
+        # Close at last confirmed heartbeat. Resume only upon fresh DCS telemetry;
+        # never grant time or protection from a pre-restart slot assumption.
+        active = {p.ucid for p in server.get_active_players()}
+        stale = []
         async with self.apool.connection() as conn:
-            cursor = await conn.execute("""
-                SELECT player_ucid
-                FROM hardcore_sessions
-                WHERE server_name = %s AND settled = FALSE
-            """, (server.name,))
-            rows = await cursor.fetchall()
-
-            for (ucid,) in rows:
-                if ucid in active_ucids:
-                    await conn.execute("""
-                        UPDATE hardcore_sessions
-                        SET segment_started_at =
-                                CASE WHEN segment_started_at IS NULL THEN NULL
-                                     ELSE (NOW() AT TIME ZONE 'utc')
-                                END,
-                            last_seen_at = (NOW() AT TIME ZONE 'utc')
-                        WHERE server_name = %s AND player_ucid = %s AND settled = FALSE
-                    """, (server.name, ucid))
-                else:
-                    await conn.execute("""
-                        UPDATE hardcore_sessions
-                        SET eligible_seconds = eligible_seconds +
-                            CASE
-                                WHEN segment_started_at IS NULL THEN 0
-                                ELSE GREATEST(
-                                    0,
-                                    FLOOR(EXTRACT(EPOCH FROM (
-                                        last_seen_at - segment_started_at
-                                    )))::BIGINT
-                                )
-                            END,
-                            segment_started_at = NULL,
-                            airborne = FALSE
-                        WHERE server_name = %s AND player_ucid = %s AND settled = FALSE
-                    """, (server.name, ucid))
-                    stale_to_settle.append(ucid)
-
-        for ucid in stale_to_settle:
-            try:
-                await self.settle(server, ucid)
-            except Exception:
-                self.log.exception("Hardcore: failed to settle stale session for %s", ucid)
+            async with conn.transaction(), conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute('SELECT id,player_ucid,last_seen_at FROM hardcore_sessions WHERE server_name=%s AND NOT settled FOR UPDATE', (server.name,))
+                for row in await cur.fetchall():
+                    await self._close_segment(conn,row['id'],row['last_seen_at'])
+                    await conn.execute("UPDATE hardcore_sessions SET segment_role='spectator',protected=NULL,airborne=FALSE WHERE id=%s", (row['id'],))
+                    if row['player_ucid'] not in active:
+                        stale.append(row['player_ucid'])
+        for ucid in stale:
+            await self.settle(server,ucid)

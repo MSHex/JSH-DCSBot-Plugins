@@ -151,6 +151,7 @@ at that moment. Ships count as landing places, so carrier traps pay out.
 | `crash`, `eject`, `pilot_death`, `self_kill` | Pay `death_payout` of the bucket, lose the rest |
 | `disconnect`, `onPlayerChangeSlot` | Pay `death_payout` of the bucket, lose the rest |
 | `mission_end`, `onMissionLoadEnd` | Drop all buckets on that server |
+| `registerDCSServer` | Re-inject `mission.lua` into a running mission, so a bot restart picks up a new version |
 
 ## Audit trail
 

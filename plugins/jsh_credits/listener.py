@@ -347,8 +347,23 @@ class CreditsEventListener(EventListener["Credits"]):
 
     @event(name="registerDCSServer")
     async def registerDCSServer(self, server: Server, data: dict) -> None:
-        # the mission is already running, so (re-)inject the hook
-        if data.get('channel', '').startswith('sync-'):
+        """
+        Re-inject into a mission that is already running, so a bot restart is
+        enough to pick up a new mission.lua.
+
+        This used to fire only when data['channel'] started with 'sync-', on the
+        assumption that the registration reply carries the sync channel through
+        to plugin listeners. In practice it does not reliably, and the symptom is
+        invisible: the bot loads the new version, reports it migrated, and the
+        mission quietly keeps running the old script until someone restarts the
+        mission. That cost a deploy of 1.4 -- the refuel handler was on disk and
+        loaded by the bot for two days without ever reaching the mission.
+
+        The guard bought nothing anyway. _inject_lua is cheap, and the script
+        itself is idempotent: every handler sits behind its own `if not ... then`
+        so a second injection registers only what is missing.
+        """
+        if server.status in (Status.RUNNING, Status.PAUSED):
             asyncio.create_task(self._inject_lua(server))
 
     @event(name="onMissionLoadEnd")

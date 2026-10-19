@@ -12,6 +12,7 @@ written for the JSH servers and used in production there.
 | [`awardautomation`](plugins/awardautomation/) | Grants Logbook medals automatically from campaign statistics, qualifications and Hardcore sessions. |
 | [`rankstatus`](plugins/rankstatus/) | `/pilot status` — rank, credits, promotion progress, combat record, airframes, awards. |
 | [`jsh_ranks`](plugins/jsh_ranks/) | Makes a Foothold mission enforce the Discord rank ladder instead of its own in-mission rank credits. |
+| [`jsh_coords`](plugins/jsh_coords/) | `/coords convert` — paste a coordinate in any format DCS uses and get it back in all the others, including MGRS, the three lat/long forms, DCS metric X/Z and terrain altitude. |
 
 Each plugin is independent and has its own README with install steps, commands
 and configuration. They do interact through credits, though — see below.

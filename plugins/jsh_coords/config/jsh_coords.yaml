@@ -1,0 +1,19 @@
+# jsh_coords -- copy to <bot>/config/plugins/jsh_coords.yaml on every node.
+#
+# There is almost nothing to configure. MGRS and the three lat/long forms are
+# arithmetic the bot does on its own and work with no mission and no server
+# selected; `enabled` only governs whether a given server will answer the
+# mission-side half of the conversion (DCS metric X/Z and terrain altitude).
+#
+# Sections are keyed on the INSTANCE name -- the names under `instances:` in
+# nodes.yaml -- not the server names from servers.yaml. A section named after a
+# server silently does nothing.
+
+DEFAULT:
+  enabled: true
+
+# Opt one instance out. Its players can still convert MGRS and lat/long; they
+# just cannot ask that server for metric or altitude.
+#
+# instance-name-here:
+#   enabled: false

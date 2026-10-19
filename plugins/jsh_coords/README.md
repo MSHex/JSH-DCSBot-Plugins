@@ -13,6 +13,13 @@ Paste any one of them and get the rest back:
 | Decimal degrees | `49.433744, 8.218358` |
 | DCS metric | `X-00506931 Z-00890072` |
 
+The run-together form works too, which is usually faster to type off a UFC or a
+kneeboard than hunting for the degree symbol:
+
+```text
+N 492601.48 E 81306.09
+```
+
 ## Commands
 
 | Command | Role |
@@ -33,6 +40,27 @@ of the game, a kneeboard or a Discord message works:
 
 `public: true` posts the result in the channel; by default only you see it,
 which is what you want mid-flight.
+
+### Degree-digit padding
+
+Aircraft disagree about how many digits the longitude degrees get. DCS's own
+coordinate box prints `E 8°13'06.09"`; the Hornet, Viper and A-10C pad to three
+and show `E 008°13.101'`. In the run-together form that is the difference
+between `81306.09`, `081306.09` and `0081306.09`.
+
+All three are accepted, and so is a padded latitude. Nothing needs configuring
+and the plugin never has to know which airframe you read it off, because the
+number is split from the **right**: minutes and seconds are always two digits
+each, so whatever is left over is the degrees. Reading left to right would have
+to know the padding in advance; reading right to left does not care.
+
+Four digits or fewer means there are no seconds and the trailing pair is decimal
+minutes instead, so `N 4926.024 E 813.101` is read as `N 49°26.024' E 8°13.101'`.
+
+The one casualty is a genuine zero-degree reading: leading zeros are stripped
+before the split, so `00813` is read as `8°13'` rather than `0°08'13"`. Write
+that one with separators. It falls on the prime meridian in the Gulf of Guinea
+and on no DCS map.
 
 ## The `server` option
 

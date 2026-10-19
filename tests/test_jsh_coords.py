@@ -113,6 +113,60 @@ class TestLooseInput:
         assert coords.to_ddm(point) == 'N 49°26.000\'  E 8°13.000\''
 
 
+class TestCompact:
+    """
+    The run-together form, and the degree-digit padding different aircraft use.
+
+    Every string here is the same point as DMS/DDM/DD above. Splitting from the
+    right is what makes the padding a non-issue.
+    """
+
+    @pytest.mark.parametrize('text', [
+        'N 492601.48 E 81306.09',      # as DCS's own box numbers it
+        'N 492601.48 E 081306.09',     # longitude padded to two degree digits
+        'N 492601.48 E 0081306.09',    # padded to three -- Hornet, Viper, A-10C
+        'N492601.48 E0081306.09',      # no spaces anywhere
+        '492601.48N 081306.09E',       # hemisphere letters trailing
+        'N 0492601.48 E 0081306.09',   # latitude padded as well
+    ])
+    def test_every_padding_is_the_same_point(self, text):
+        assert coords.to_dd(coords.parse_latlon(text)) == DD
+
+    def test_splits_from_the_right(self):
+        assert coords._split_compact('81306.09') == (8, 13, pytest.approx(6.09))
+        assert coords._split_compact('081306.09') == (8, 13, pytest.approx(6.09))
+        assert coords._split_compact('0081306.09') == (8, 13, pytest.approx(6.09))
+
+    def test_four_digits_is_decimal_minutes(self):
+        """4926.024 has no seconds -- the trailing pair is decimal minutes."""
+        assert coords._split_compact('4926.024') == (49, pytest.approx(26.024), 0)
+        point = coords.parse_latlon('N 4926.024 E 813.101')
+        assert coords.to_ddm(point) == 'N 49°26.024\'  E 8°13.101\''
+
+    def test_padded_decimal_minutes(self):
+        point = coords.parse_latlon('N 4926.024 E 00813.101')
+        assert coords.to_ddm(point) == 'N 49°26.024\'  E 8°13.101\''
+
+    def test_no_fraction(self):
+        point = coords.parse_latlon('N 492601 E 081306')
+        assert coords.to_dms(point, 0) == 'N 49°26\'01"  E 8°13\'06"'
+
+    def test_hemisphere_letter_is_required(self):
+        """
+        Two bare run-together numbers are just two numbers. Guessing at them
+        would hijack anything else someone might paste.
+        """
+        assert coords.parse_latlon('492601.48 81306.09') is None
+
+    @pytest.mark.parametrize('text', [
+        '49.433744, 8.218358',
+        '-33.8688, 151.2093',
+    ])
+    def test_decimal_degrees_still_wins(self, text):
+        """The compact rule must not swallow ordinary decimal degrees."""
+        assert coords.parse_latlon(text) is not None
+
+
 class TestMGRS:
     @pytest.mark.parametrize('text,expected', [
         ('32U MV 12345 67890', '32UMV1234567890'),

@@ -80,6 +80,15 @@ _LATLON_RE = re.compile(
     r'^\s*' + _DMS_PART + r'[\s,/]+' + _DMS_PART.replace('>', '2>') + r'\s*$',
     re.IGNORECASE | re.VERBOSE)
 
+# The run-together form pilots actually type: N 492601.48 E 81306.09, and the
+# same thing as a jet displays it with the longitude padded to three degree
+# digits: E 0081306.09. Split from the RIGHT -- see _split_compact.
+_COMPACT_RE = re.compile(
+    r'^\s*(?:(?P<pre>[NSEW])\s*)?(?P<first>\d{3,9}(?:\.\d+)?)\s*(?P<post>[NSEW])?'
+    r'[\s,/]+'
+    r'(?:(?P<pre2>[NSEW])\s*)?(?P<second>\d{3,9}(?:\.\d+)?)\s*(?P<post2>[NSEW])?\s*$',
+    re.IGNORECASE)
+
 _DECIMAL_RE = re.compile(
     r'^\s*(-?\d{1,3}(?:\.\d+)?)\s*°?\s*([NS])?\s*[,;\s]\s*'
     r'(-?\d{1,3}(?:\.\d+)?)\s*°?\s*([EW])?\s*$', re.IGNORECASE)
@@ -106,6 +115,46 @@ def _hemispheres(*letters: Optional[str]) -> tuple[Optional[str], Optional[str]]
     lat = next((letter for letter in found if letter in ('N', 'S')), None)
     lon = next((letter for letter in found if letter in ('E', 'W')), None)
     return lat, lon
+
+
+def _split_compact(number: str) -> tuple[float, float, float]:
+    """
+    Split a run-together coordinate into degrees, minutes and seconds.
+
+    Parsed from the RIGHT, which is what makes this unambiguous. Minutes and
+    seconds are always two digits, so whatever is left over is the degrees --
+    and that is why a jet padding its longitude to three digits needs no special
+    case at all:
+
+        81306.09  -> 8 deg 13' 06.09"      (DCS's own box)
+        081306.09 -> 08 deg 13' 06.09"     (Hornet, Viper, A-10C)
+        0081306.09 -> 008 deg 13' 06.09"   (padded to three)
+
+    All three are the same longitude. Reading left to right would have to know
+    in advance how many degree digits the aircraft prints; reading right to left
+    does not care.
+
+    Four digits or fewer means there are no seconds and the trailing pair is
+    decimal minutes instead -- 4926.024 is 49 deg 26.024'.
+
+    Leading zeros are stripped first, so a padded 00813 is read as 8 deg 13'
+    rather than as 0 deg 08' 13". The cost is that a genuine 0 deg 08' 13" has
+    to be written with separators. That point is in the Gulf of Guinea, on the
+    prime meridian, and on no DCS map.
+    """
+    integer, _, fraction = number.partition('.')
+    fraction = f'0.{fraction}' if fraction else '0'
+
+    trimmed = integer.lstrip('0') or '0'
+    # Keep enough digits for degrees + two minute digits.
+    integer = trimmed.rjust(3, '0')
+
+    if len(integer) >= 5:
+        degrees, minutes, seconds = integer[:-4], integer[-4:-2], integer[-2:]
+        return float(degrees), float(minutes), float(seconds) + float(fraction)
+
+    degrees, minutes = integer[:-2], integer[-2:]
+    return float(degrees), float(minutes) + float(fraction), 0.0
 
 
 def parse_mgrs(text: str) -> Optional[str]:
@@ -143,6 +192,21 @@ def parse_latlon(text: str) -> Optional[LatLon]:
         if (g['pre'] or g['post'] or '').upper() in ('E', 'W'):
             first, second = second, first
         return LatLon(_signed(*first, lat_hemi), _signed(*second, lon_hemi))
+
+    match = _COMPACT_RE.match(text)
+    if match:
+        g = match.groupdict()
+        letters = (g['pre'], g['post'], g['pre2'], g['post2'])
+        # A hemisphere letter is required here. Without one, two run-together
+        # numbers are just two numbers, and guessing at them would hijack
+        # anything else a user might paste.
+        if any(letters):
+            lat_hemi, lon_hemi = _hemispheres(*letters)
+            first = _split_compact(g['first'])
+            second = _split_compact(g['second'])
+            if (g['pre'] or g['post'] or '').upper() in ('E', 'W'):
+                first, second = second, first
+            return LatLon(_signed(*first, lat_hemi), _signed(*second, lon_hemi))
 
     match = _DECIMAL_RE.match(text)
     if match:

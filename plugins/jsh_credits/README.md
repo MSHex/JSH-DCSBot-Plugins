@@ -74,15 +74,42 @@ come last. Supported keys: `category`, `type` (`Player` or `AI`), `unit_type`,
 
 ## Air-to-air refuelling
 
-DCS names the **receiving** aircraft as the initiator of `S_EVENT_REFUELING` and
-`S_EVENT_REFUELING_STOP`, so the mission script samples the fuel state at connect
-and subtracts at disconnect. `getFuel()` is a fraction of internal capacity and
-`getDesc().fuelMassMax` is that capacity in kilograms, so the difference converts
-straight to pounds.
+Measured by **sampling fuel**, not by DCS's refuel events. Every five seconds
+the mission script reads each player aircraft's fuel, and any increase while
+airborne is treated as fuel taken from a tanker. The whole session is
+accumulated and sent as one total when the fuel stops rising.
 
-Two known approximations, neither of which matters for an economy: fuel in
-external tanks sits outside `fuelMassMax`, and the aircraft burns while it
-drinks. Both make the figure conservative.
+### Why not the refuel events
+
+Because they cannot identify the receiver. Over one evening on the Foothold
+server DCS fired 13 `S_EVENT_REFUELING` events and named the **KC-135** as the
+initiator in all 13; of 14 `S_EVENT_REFUELING_STOP` events, exactly one named
+the human. It also delivered that one stop event twice at the same timestamp.
+
+So the receiver never appears on the start event. An implementation that
+records a baseline on connect and subtracts on disconnect — which is what this
+plugin did until 1.6 — records no baseline, finds nothing to subtract, and pays
+nobody. It never worked on any server.
+
+Fuel going up while airborne is a refuelling whoever DCS decides to name, which
+is why the sampler replaced it.
+
+### What counts
+
+`getFuel()` is a fraction of internal capacity and `getDesc().fuelMassMax` is
+that capacity in kilograms, so a change converts straight to pounds.
+
+- **External tanks are paid for.** `getFuel()` exceeds 1.0 when externals are
+  carried and nothing is capped at a full internal load, so filling drop tanks
+  earns like any other fuel taken.
+- **Ground refuelling and rearming are not**, excluded by `inAir()`.
+- The aircraft burns while it drinks, so the figure stays slightly
+  conservative.
+- A pilot who takes fuel and then changes slot is settled on the way out.
+
+The whole session is sent as a single total rather than a drip of five-second
+deltas, because the bot applies `minimum_lbs` before paying: sent piecemeal,
+every chunk would fall under it and the pilot would be paid nothing.
 
 **The pilot taking the fuel is paid, not the tanker.** Rewarding a human-crewed
 tanker for fuel given away would be a separate feature.

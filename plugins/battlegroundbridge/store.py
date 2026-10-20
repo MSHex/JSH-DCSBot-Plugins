@@ -19,7 +19,9 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from . import sql as S
-from .domain import (BRIDGE_ID_START, ImportSummary, build_recon_payload, convert_drawing,
+from .domain import (BRIDGE_ID_START, DEFAULT_RING_COLOUR, DEFAULT_RING_LABEL,
+                     DEFAULT_RING_SKIP, ImportSummary, build_recon_payload,
+                     build_ring_payload, convert_drawing, match_threat_system,
                      merge_marker_update, Converted, Unsupported)
 
 
@@ -111,7 +113,8 @@ class BridgeStore:
 
     async def upsert_intel(self, server_name: str, token: str, marker_id: int, sequence: int,
                            title: str, description: list[str], mgrs: str, lat: float, lon: float,
-                           ucid: str, player_name: str, side: str = 'blue') -> Outcome:
+                           ucid: str, player_name: str, side: str = 'blue',
+                           rings: Optional[dict] = None) -> Outcome:
         """Create the report for this marker, or move and retitle the existing one."""
         async with self.lock(server_name):
             async with self.pool.connection() as conn:
@@ -145,6 +148,8 @@ class BridgeStore:
                         await conn.execute(S.UPDATE_GEOMETRY,
                                            (json.dumps(payload), geometry_id, server_name))
                         await conn.execute(S.TOUCH_ITEM_CONTENT, (title, item_id))
+                        await self._sync_intel_ring(conn, server_name, token, item_id,
+                                                    title, lat, lon, rings, player_name, side)
                         await self._audit(conn, server_name, 'update', geometry_id, marker_id,
                                           ucid, player_name, title)
                         return Updated(geometry_id)
@@ -157,9 +162,13 @@ class BridgeStore:
                         reported_at=_now(), side=side)
                     await conn.execute(S.INSERT_GEOMETRY,
                                        (geometry_id, server_name, json.dumps(payload)))
-                    await conn.execute(S.INSERT_ITEM,
-                                       (server_name, token, 'intel', marker_id, geometry_id,
-                                        ucid, player_name, title))
+                    item_cursor = await conn.execute(
+                        S.INSERT_ITEM,
+                        (server_name, token, 'intel', marker_id, geometry_id,
+                         ucid, player_name, title, None))
+                    item_id = (await item_cursor.fetchone())[0]
+                    await self._sync_intel_ring(conn, server_name, token, item_id,
+                                                title, lat, lon, rings, player_name, side)
                     await self._audit(conn, server_name, 'create', geometry_id, marker_id,
                                       ucid, player_name, title)
                     return Created(geometry_id)
@@ -209,9 +218,66 @@ class BridgeStore:
                     return await self._remove(conn, server_name, item_id, geo_id,
                                               marker_id, ucid, player_name, title)
 
+    async def _sync_intel_ring(self, conn, server_name: str, token: str, item_id: int,
+                               title: str, lat: float, lon: float, rings: Optional[dict],
+                               author_name: str, side: str) -> None:
+        """
+        Make the report's threat ring agree with its title and position.
+
+        Called on create and on every update, which is what lets a ring follow a
+        marker that moves and disappear when a title stops naming a system --
+        retitling `SA-10` to `empty revetment` should not leave a 119 km circle
+        on the map.
+        """
+        rings = rings or {}
+        if not rings.get('enabled', False):
+            return
+        match = match_threat_system(title, rings.get('systems') or {},
+                                    rings.get('skip_pattern', DEFAULT_RING_SKIP))
+
+        cursor = await conn.execute(S.FIND_RING_BY_PARENT, (item_id,))
+        existing = await cursor.fetchone()
+
+        if not match:
+            if existing:
+                ring_item_id, geometry_id, _ = existing
+                await conn.execute(S.DELETE_GEOMETRY, (geometry_id, server_name))
+                await conn.execute(S.TOMBSTONE_ITEM, (ring_item_id,))
+            return
+
+        system, radius = match
+        payload = build_ring_payload(
+            system, radius, [lat, lon], author_name, side=side,
+            colour=rings.get('colour', DEFAULT_RING_COLOUR),
+            label=rings.get('label', DEFAULT_RING_LABEL))
+
+        if existing:
+            ring_item_id, geometry_id, _ = existing
+            await conn.execute(S.UPDATE_GEOMETRY,
+                               (json.dumps(payload), geometry_id, server_name))
+            await conn.execute(S.TOUCH_ITEM_CONTENT, (payload['title'], ring_item_id))
+            return
+
+        cursor = await conn.execute(S.NEXT_GEOMETRY_ID)
+        geometry_id = int((await cursor.fetchone())[0])
+        await conn.execute(S.INSERT_GEOMETRY,
+                           (geometry_id, server_name, json.dumps(payload)))
+        await conn.execute(S.INSERT_ITEM,
+                           (server_name, token, 'ring', None, geometry_id, None,
+                            author_name, payload['title'], item_id))
+
     async def _remove(self, conn, server_name: str, item_id: int, geometry_id: int,
                       marker_id: Optional[int], ucid: Optional[str], player_name: str,
                       title: Optional[str]) -> Outcome:
+        # The ring goes first. ON DELETE CASCADE covers the mapping row, but the
+        # geometry row it points at is the website's and has to be removed here.
+        cursor = await conn.execute(S.FIND_RING_BY_PARENT, (item_id,))
+        ring = await cursor.fetchone()
+        if ring:
+            ring_item_id, ring_geometry_id, _ = ring
+            await conn.execute(S.DELETE_GEOMETRY, (ring_geometry_id, server_name))
+            await conn.execute(S.TOMBSTONE_ITEM, (ring_item_id,))
+
         await conn.execute(S.DELETE_GEOMETRY, (geometry_id, server_name))
         await conn.execute(S.TOMBSTONE_ITEM, (item_id,))
         await self._audit(conn, server_name, 'delete', geometry_id, marker_id,
@@ -259,7 +325,8 @@ class BridgeStore:
 
     async def replace_drawings(self, server_name: str, token: str, layers: dict,
                                wanted_layers: list[str], author_name: str,
-                               side: str = 'blue') -> ImportSummary:
+                               side: str = 'blue',
+                               rings: Optional[dict] = None) -> ImportSummary:
         """
         Reimport the configured layers, replacing only what the bridge imported
         before. Website-created geometry and marker intel are untouched: the
@@ -271,6 +338,7 @@ class BridgeStore:
         """
         summary = ImportSummary()
         converted: list[Converted] = []
+        ring_payloads: list[dict] = []
         for layer_name, drawings in (layers or {}).items():
             if wanted_layers and layer_name not in wanted_layers:
                 continue
@@ -285,6 +353,25 @@ class BridgeStore:
                 if result.approximated:
                     summary.approximated.append(
                         f"{result.payload['title']}: {result.approximated}")
+
+                # Rings attach to point features only. A zone, a line or an
+                # existing circle never gets one -- otherwise a hand-drawn
+                # 'SA-11 Range' circle would acquire a ring of its own.
+                if result.kind != 'markpoint':
+                    continue
+                ring_config = rings or {}
+                if not ring_config.get('enabled', False):
+                    continue
+                match = match_threat_system(
+                    result.payload['title'], ring_config.get('systems') or {},
+                    ring_config.get('skip_pattern', DEFAULT_RING_SKIP))
+                centre = result.payload['fields'].get('posPoint')
+                if match and centre and len(centre) == 2:
+                    system, radius = match
+                    ring_payloads.append(build_ring_payload(
+                        system, radius, centre, author_name, side=side,
+                        colour=ring_config.get('colour', DEFAULT_RING_COLOUR),
+                        label=ring_config.get('label', DEFAULT_RING_LABEL)))
 
         async with self.lock(server_name):
             async with self.pool.connection() as conn:
@@ -304,8 +391,23 @@ class BridgeStore:
                         await conn.execute(
                             S.INSERT_ITEM,
                             (server_name, token, 'drawing', None, geometry_id, None,
-                             author_name, result.payload['title']))
+                             author_name, result.payload['title'], None))
                         summary.imported += 1
+
+                    # Rings for the point features, stored as ordinary drawings:
+                    # the next import replaces every row this one wrote, so they
+                    # need no parent link and no lifecycle of their own.
+                    for ring in ring_payloads:
+                        cursor = await conn.execute(S.NEXT_GEOMETRY_ID)
+                        geometry_id = int((await cursor.fetchone())[0])
+                        await conn.execute(
+                            S.INSERT_GEOMETRY,
+                            (geometry_id, server_name, json.dumps(ring)))
+                        await conn.execute(
+                            S.INSERT_ITEM,
+                            (server_name, token, 'drawing', None, geometry_id, None,
+                             author_name, ring['title'], None))
+                        summary.rings += 1
 
                     await self._audit(conn, server_name, 'import', None, None, None,
                                       author_name, summary.describe())

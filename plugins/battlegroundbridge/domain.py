@@ -340,6 +340,74 @@ def convert_drawing(drawing: dict, author_name: str, side: str = 'blue') -> Unio
     return Unsupported(name, primitive, 'unsupported primitive type')
 
 
+# --------------------------------------------------------- threat rings
+#
+# Seeded from the rings already drawn by hand on the JSH campaign map, so the
+# generated ones match what the GMs were producing manually rather than
+# introducing a second, competing set of numbers. These are a doctrine choice,
+# not a physical constant -- they belong in the config and are meant to be
+# edited there.
+DEFAULT_THREAT_SYSTEMS: dict[str, int] = {
+    'SA-5': 297100,
+    'SA-10': 119265,
+    'SA-11': 51275,
+}
+DEFAULT_RING_COLOUR = '#ff0000'
+DEFAULT_RING_LABEL = '{name} Range'
+#: A point already describing a ring must not acquire a ring of its own.
+DEFAULT_RING_SKIP = r'\b(range|ring|mez|wez)\b'
+
+
+def _system_pattern(system: str) -> re.Pattern:
+    """
+    Match a system designation the way people actually type it.
+
+    `SA-10` has to match `SA10` and `SA 10`, and must NOT match inside `SA-100`
+    or be matched by a shorter `SA-1` -- which is why the trailing lookahead
+    excludes digits rather than relying on \\b.
+    """
+    body = re.sub(r'[^A-Za-z0-9]+', r'[-\\s]?', system.strip())
+    return re.compile(rf'(?<![A-Za-z0-9]){body}(?![0-9])', re.IGNORECASE)
+
+
+def match_threat_system(title: str, systems: dict[str, Any],
+                        skip_pattern: str = DEFAULT_RING_SKIP) -> Optional[tuple[str, float]]:
+    """
+    The threat system a title names, and its ring radius in metres.
+
+    Longest designation first, so `SA-10` wins over `SA-1` when a config
+    contains both. Returns None when nothing matches, or when the title already
+    describes a ring.
+    """
+    if not title:
+        return None
+    if skip_pattern and re.search(skip_pattern, title, re.IGNORECASE):
+        return None
+    for system in sorted(systems, key=len, reverse=True):
+        radius = _number(systems[system])
+        if radius > 0 and _system_pattern(system).search(title):
+            return system, radius
+    return None
+
+
+def build_ring_payload(system: str, radius: float, centre: list[float], author_name: str,
+                       side: str = 'blue', colour: str = DEFAULT_RING_COLOUR,
+                       label: str = DEFAULT_RING_LABEL) -> dict:
+    """A circle of `radius` metres around `centre`, in Battleground's own shape."""
+    fields = dict(FIELD_DEFAULTS)
+    fields.update({
+        'type': 'circle',
+        'side': side if side in SIDES else 'blue',
+        'center': [centre[0], centre[1]],
+        'radius': radius,
+        'color': colour,
+        'clickable': True,
+    })
+    return {'title': label.format(name=system),
+            'author': {'name': author_name, 'icon_url': ''},
+            'fields': fields}
+
+
 #: DCS writes a drawing's colour as 0xRRGGBBAA. Confirmed against a real
 #: mission rather than assumed: 0xff0000ff and 0x0000ffff dominate its Common
 #: layer, which read as opaque red and opaque blue, and the outline-only boxes
@@ -428,6 +496,7 @@ def _number(value: Any) -> float:
 class ImportSummary:
     """What a drawing import actually did, for `/bgbridge status` and the log."""
     imported: int = 0
+    rings: int = 0
     approximated: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     removed: int = 0
@@ -435,6 +504,8 @@ class ImportSummary:
 
     def describe(self) -> str:
         parts = [f"{self.imported} imported"]
+        if self.rings:
+            parts.append(f"{self.rings} threat rings")
         if self.removed:
             parts.append(f"{self.removed} replaced")
         if self.approximated:

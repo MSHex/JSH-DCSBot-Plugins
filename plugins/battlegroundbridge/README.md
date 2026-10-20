@@ -126,6 +126,42 @@ A refresh replaces only drawings this bridge imported. Marker intel and
 website-created entries are untouched. DCS is authoritative for drawings, which
 is why they are replaced outright rather than merged the way intel is.
 
+## Threat rings
+
+Off by default. When `threat_rings.enabled` is on, anything whose **title names
+a SAM system** gets a circle drawn around it at that system's range — both
+pilot-reported intel and imported mission labels.
+
+```yaml
+threat_rings:
+  enabled: true
+  colour: "#ff0000"
+  label: "{name} Range"
+  systems:
+    SA-5: 297100
+    SA-10: 119265
+    SA-11: 51275
+```
+
+The radii are **metres and a doctrine choice**, not a physical constant. These
+seed values are the ones JSH was already drawing by hand, so a generated ring
+lands on top of the manual one instead of disagreeing with it. Edit them and
+add systems freely.
+
+Matching is case-insensitive and accepts `SA-10`, `SA10` and `SA 10`. Longer
+designations win, so a config containing both `SA-1` and `SA-10` never gives an
+SA-10 the shorter one's radius — and `SA-100` matches neither.
+
+Rings attach to **point features only**: intel reports and markpoints, never
+zones, lines or circles. A title that already describes a ring (`SA-10 Range`,
+anything matching `skip_pattern`) never gets one, so hand-drawn range circles
+and the plugin's own rings are both left alone.
+
+An intel ring follows its report. Move the marker and the ring moves; retitle
+`SA-10` to `empty revetment` and the ring disappears; delete the report and the
+ring goes with it. Rings generated from mission drawings are replaced wholesale
+on every import, like the drawings themselves.
+
 ## Commands
 
 | Command | Role |
@@ -147,6 +183,7 @@ All replies are ephemeral.
 | `drawing_layers` | Which layers to import. `[Common]` by default. |
 | `retain_intel_on_mission_change` | `true` keeps reports across missions. `false` clears bridge-created intel when a genuinely new mission starts. |
 | `intel_expiry_hours` | `0` disables expiry. Measured from the last DCS-driven change, so website edits do not extend it. |
+| `threat_rings` | Automatic range circles for titles naming a SAM system. Off by default. |
 | `admin_roles`, `admin_ucids` | Who may manage other players' reports. |
 
 Two gates, not one: `enabled` **and** membership of `server_names`. A
@@ -229,7 +266,7 @@ python3 tests/bgb_sql_check.py "host=/tmp port=5433 dbname=bgbtest user=postgres
 Point that at a disposable database. It inserts, updates and deletes, and it
 runs every statement the plugin uses through `PREPARE` against the live schema.
 
-**What was actually run:** 80 pure-logic assertions, and 20 SQL assertions
+**What was actually run:** 106 pure-logic assertions, and 20 SQL assertions
 against PostgreSQL 16.15 — covering the create/update/delete lifecycle,
 ownership, cross-server rejection, receipt idempotency, deletion replay
 protection, expiry, and preservation of website descriptions and screenshots.

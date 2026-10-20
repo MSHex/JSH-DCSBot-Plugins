@@ -42,6 +42,17 @@ class CreditsEventListener(EventListener["Credits"]):
         #         'rows':    [jsh_credits_events.id, ...]}
         self.pending: dict[str, dict[str, Any]] = {}
         self.lock = asyncio.Lock()
+        # asyncio keeps only a WEAK reference to a running task, so a task that
+        # nothing else holds can be garbage-collected before it finishes. The
+        # injection was spawned bare, and registration is the busiest moment in
+        # the loop -- which is how 1.7 could be correctly installed, pass its
+        # size check, and still never reach the mission.
+        self._tasks: set = set()
+
+    def _spawn(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     # ------------------------------------------------------------------
     # helpers
@@ -377,8 +388,10 @@ class CreditsEventListener(EventListener["Credits"]):
             return
 
         await server.send_to_dcs(message)
-        self.log.debug(f"JSH Credits: mission hooks injected into {server.name} "
-                       f"({size} bytes)")
+        # INFO, not DEBUG. This happens twice a mission at most, and when it
+        # stops happening that is exactly what you need the log to tell you.
+        self.log.info(f"JSH Credits: mission hooks injected into {server.name} "
+                      f"({size} bytes)")
 
     @staticmethod
     def _minify_lua(script: str) -> str:
@@ -413,12 +426,17 @@ class CreditsEventListener(EventListener["Credits"]):
         so a second injection registers only what is missing.
         """
         if server.status in (Status.RUNNING, Status.PAUSED):
-            asyncio.create_task(self._inject_lua(server))
+            self._spawn(self._inject_lua(server))
+        else:
+            # Said out loud, because a silent skip here is indistinguishable
+            # from an injection that was sent and did nothing.
+            self.log.debug(f"JSH Credits: not injecting into {server.name}, "
+                           f"status is {server.status}")
 
     @event(name="onMissionLoadEnd")
     async def onMissionLoadEnd(self, server: Server, _: dict) -> None:
         await self._drop_server(server, 'mission load')
-        asyncio.create_task(self._inject_lua(server))
+        self._spawn(self._inject_lua(server))
 
     @event(name="jshCreditsLanding")
     async def jshCreditsLanding(self, server: Server, data: dict) -> None:

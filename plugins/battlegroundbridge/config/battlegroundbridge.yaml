@@ -1,0 +1,40 @@
+# battlegroundbridge -- copy to <bot>/config/plugins/battlegroundbridge.yaml
+# on EVERY node.
+#
+# Sections are keyed on the INSTANCE name (the names under `instances:` in
+# nodes.yaml), not the server names from servers.yaml. A section named after a
+# server silently does nothing at all.
+#
+# `server_names` is a second, separate gate: the DCS server names this bridge
+# may write for. Both must be satisfied, because a Battleground website entry
+# can carry a display alias that is not the DCS server name, and the cost of
+# getting that wrong is one server's intel appearing on another's map.
+
+DEFAULT:
+  enabled: false
+  server_names: []
+  # Clamped to 3-60 regardless of what is written here.
+  poll_seconds: 5
+  import_drawings: true
+  drawing_layers: [Common]
+  retain_intel_on_mission_change: true
+  # 0 disables expiry. When positive, measured from the last DCS-driven change,
+  # so edits made on the website never extend a report's life.
+  intel_expiry_hours: 0
+  admin_roles: [DCS Admin, GameMaster]
+  # UCIDs that may manage other players' reports even without a linked Discord
+  # account. Real UCIDs must never be committed to a repository.
+  admin_ucids: []
+
+# Replace both names with your own. These are the instance name from
+# nodes.yaml and the DCS server name from servers.yaml respectively.
+your-instance-name:
+  enabled: true
+  server_names: [Your DCS Server Name]
+
+# On a multi-node setup, qualify by node instead:
+#
+# YOUR_NODE_NAME:
+#   your-instance-name:
+#     enabled: true
+#     server_names: [Your DCS Server Name]

@@ -13,6 +13,7 @@ key name wrong here produces a row the website silently ignores rather than an
 error, so the names are pinned in ONE place (FIELD_DEFAULTS) and never spelled
 out again.
 """
+import math
 import re
 
 from dataclasses import dataclass, field
@@ -69,6 +70,11 @@ FIELD_DEFAULTS: dict[str, Any] = {
     'groundFt': 0,
     'groundFtSet': False,
 }
+
+#: Metres per degree of latitude. Longitude is this scaled by cos(latitude).
+#: Used only to turn a rectangle's corner offsets into lat/lon -- see
+#: _rect_corners for why that approximation is acceptable there and nowhere else.
+METRES_PER_DEGREE = 111320.0
 
 #: Fields the F10 marker owns. On an update, everything else in an existing row
 #: is left exactly as the website left it -- that is what preserves notes,
@@ -304,9 +310,16 @@ def convert_drawing(drawing: dict, author_name: str, side: str = 'blue') -> Unio
             approximated = (f"polygonMode '{mode}' approximated from its vertices"
                             if mode in ('rect', 'oval', 'arrow') else None)
             return Converted('zone', payload('zone', points=points), approximated)
-        # rect/oval drawn without exported vertices: DCS describes them by
-        # width/height/r1/r2 and an angle instead, which would have to be
-        # re-derived. Out of scope for v1, and named in the summary.
+
+        width, height = _number(drawing.get('width')), _number(drawing.get('height'))
+        if mode == 'rect' and centre and width and height:
+            corners = _rect_corners(centre, width, height, _number(drawing.get('angle')))
+            return Converted('zone', payload('zone', points=corners),
+                             'rect corners derived from width, height and angle')
+
+        # oval and arrow are described by r1/r2/length rather than width/height,
+        # and neither appears on a Common layer in any mission seen so far. They
+        # stay skipped and named rather than guessed at.
         return Unsupported(name, primitive,
                            f"polygonMode '{mode}' has no exported vertices")
 
@@ -323,6 +336,50 @@ def convert_drawing(drawing: dict, author_name: str, side: str = 'blue') -> Unio
         return Converted('markpoint', converted, note)
 
     return Unsupported(name, primitive, 'unsupported primitive type')
+
+
+def _rect_corners(centre: list[float], width: float, height: float,
+                  angle_degrees: float) -> list[list[float]]:
+    """
+    The four corners of a DCS rectangle drawing, as [lat, lon].
+
+    DCS stores a rect as a point plus `width`, `height` and `angle`, and exports
+    no vertices at all -- so unlike every other shape here, the corners have to
+    be derived. Three things had to be settled before this could be written
+    honestly, and all three were settled against a real mission file
+    (Egypt_Went_Rogue 1.3.8, 50 rects on its Common layer) rather than assumed:
+
+    - `mapX`/`mapY` is the **centre**, not a corner. Tested by counting how many
+      mission units each interpretation encloses: centre put units inside 15 of
+      the 65 rects, corner only 10, and enclosed 490 units against 139.
+    - `height` runs north-south (map x), `width` east-west (map y). The same
+      test preferred this on all rects, on elongated ones, and on very elongated
+      ones -- where orientation matters most -- and it matches the plain reading
+      of the words.
+    - `angle` is degrees, applied anticlockwise about the centre.
+
+    The offsets are converted to degrees with a flat local approximation rather
+    than the terrain's true projection, because the only exact converter lives
+    in the mission environment and these drawings arrive already converted. Over
+    a box of a few kilometres that costs a couple of metres, which is why rects
+    are reported as approximated. A kill box is not a survey.
+    """
+    latitude, longitude = centre[0], centre[1]
+    half_north, half_east = height / 2.0, width / 2.0
+    radians = math.radians(angle_degrees)
+    cos_a, sin_a = math.cos(radians), math.sin(radians)
+    metres_per_degree_lon = METRES_PER_DEGREE * max(math.cos(math.radians(latitude)), 1e-6)
+
+    corners: list[list[float]] = []
+    for north, east in ((half_north, half_east), (half_north, -half_east),
+                        (-half_north, -half_east), (-half_north, half_east)):
+        # Rotate out of the rectangle's own frame into the map's.
+        d_north = north * cos_a - east * sin_a
+        d_east = north * sin_a + east * cos_a
+        corners.append([latitude + d_north / METRES_PER_DEGREE,
+                        longitude + d_east / metres_per_degree_lon])
+    corners.append(list(corners[0]))     # closed ring
+    return corners
 
 
 def _latlon_list(value: Any) -> list[list[float]]:

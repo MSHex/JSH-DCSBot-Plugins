@@ -483,6 +483,23 @@ class TestFriendlyCoverage:
     def test_label_falls_back_when_only_colour_is_given(self):
         assert d.match_threat_system('Hawk site', self.MIXED).title == 'Hawk Range'
 
+    def test_decimal_radii_survive_intact(self):
+        """
+        The hand-drawn JSH circles carry decimals (119265.836 m). A generated
+        ring has to use the same value, not a rounded one, or it sits a metre
+        off the manual circle it is meant to replace.
+        """
+        exact = {'SA-10': 119265.836, 'SA-5': 297100.22,
+                 'Patriot': {'radius': 51275.52, 'colour': '#0068ff'}}
+        assert d.match_threat_system('SA-10', exact).radius == 119265.836
+        assert d.match_threat_system('SA-5', exact).radius == 297100.22
+        assert d.match_threat_system('Patriot', exact).radius == 51275.52
+
+    def test_a_decimal_radius_reaches_the_payload(self):
+        ring = d.match_threat_system('SA-10', {'SA-10': 119265.836})
+        payload = d.build_ring_payload(ring, [30.0, 32.0], 'M')
+        assert payload['fields']['radius'] == 119265.836
+
     def test_mapping_without_a_radius_does_not_match(self):
         assert d.match_threat_system('Patriot', {'Patriot': {'colour': '#0068ff'}}) is None
 

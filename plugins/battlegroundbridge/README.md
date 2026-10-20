@@ -118,8 +118,10 @@ mission environment and drawings arrive already converted. Over a box of a few
 kilometres that costs a couple of metres, which is why rectangles are reported
 as approximated rather than exact.
 
-Skipped and approximated shapes are **named and counted** in the log and in
-`/bgbridge status`. Nothing is converted into invented geometry: a wrong line on
+Skipped and approximated shapes are **named and counted** in `/bgbridge status`
+and, with `debug: true`, in the log. Without it the log keeps the single import
+summary line — one mission can produce sixty-odd detail lines, which is worth
+seeing the first time you deploy and noise every time after. Nothing is converted into invented geometry: a wrong line on
 a map gets briefed as if it were real, which is worse than a gap.
 
 A refresh replaces only drawings this bridge imported. Marker intel and
@@ -207,6 +209,7 @@ All replies are ephemeral.
 | `server_names` | Allowlist of DCS server names. **Required** — empty means the bridge stays off. |
 | `poll_seconds` | How often the mission is drained. Clamped to 3–60. |
 | `import_drawings` | Whether to import mission drawings at all. |
+| `debug` | Log a line per imported drawing. Off by default; the one-line summary is logged regardless. |
 | `drawing_layers` | Which layers to import. `[Common]` by default. |
 | `retain_intel_on_mission_change` | `true` keeps reports across missions. `false` clears bridge-created intel when a genuinely new mission starts. |
 | `intel_expiry_hours` | `0` disables expiry. Measured from the last DCS-driven change, so website edits do not extend it. |

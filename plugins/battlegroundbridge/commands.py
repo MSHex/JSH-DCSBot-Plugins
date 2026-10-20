@@ -58,6 +58,21 @@ class BattlegroundBridge(Plugin[BridgeEventListener]):
         value = int(self.get_config(server).get('poll_seconds', 5) or 5)
         return max(POLL_MIN, min(POLL_MAX, value))
 
+    def detail(self, server: Server, message: str) -> None:
+        """
+        A per-item line from an import.
+
+        One mission produces one of these per drawing -- 61 of them on the JSH
+        campaign map -- which is exactly what you want the first time you deploy
+        and pure noise every time after. They go to DEBUG unless `debug: true`
+        says otherwise, so the bot log keeps the one summary line and nothing
+        else. The detail is still on `/bgbridge status` either way.
+        """
+        if self.get_config(server).get('debug', False):
+            self.log.info(message)
+        else:
+            self.log.debug(message)
+
     def admin_roles(self, server: Server) -> list[str]:
         return self.get_config(server).get('admin_roles', DEFAULT_ADMIN_ROLES)
 
@@ -315,9 +330,9 @@ class BattlegroundBridge(Plugin[BridgeEventListener]):
         self.last_import[server.name] = summary
         self.log.info(f"BgBridge: {server.name}: drawings -- {summary.describe()}")
         for note in summary.skipped:
-            self.log.info(f"BgBridge: {server.name}: skipped {note}")
+            self.detail(server, f"BgBridge: {server.name}: skipped {note}")
         for note in summary.approximated:
-            self.log.info(f"BgBridge: {server.name}: approximated {note}")
+            self.detail(server, f"BgBridge: {server.name}: approximated {note}")
         return summary
 
     # -------------------------------------------------------- commands

@@ -72,6 +72,22 @@ entries from most specific to least. A `default` entry matches everything and mu
 come last. Supported keys: `category`, `type` (`Player` or `AI`), `unit_type`,
 `points`, `default`.
 
+## A note on the 8192-byte limit
+
+`mission.lua` is injected as a **single UDP datagram**. The DCS side reads it
+with `UDPRecvSocket:receive()` and no size argument — LuaSocket's 8192-byte
+default — so anything larger is **truncated, not rejected**. The JSON then
+fails to parse, no handler registers, and nothing is logged on either side.
+
+Version 1.6 crossed that line (8424 bytes) purely by being well commented, and
+every injection silently did nothing: refuelling paid nobody and `dcs.log`
+showed no error at all. Since 1.7 the comments are stripped on the wire — the
+source keeps them — and the size is checked before sending, with a loud error
+if it is ever exceeded again.
+
+If you add to this file, watch for that error in the bot log. A refusal is
+recoverable; a silent truncation is what cost an evening.
+
 ## Air-to-air refuelling
 
 Measured by **sampling fuel**, not by DCS's refuel events. Every five seconds

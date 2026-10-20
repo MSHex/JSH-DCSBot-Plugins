@@ -16,6 +16,11 @@ DEFAULT:
   # Clamped to 3-60 regardless of what is written here.
   poll_seconds: 5
   import_drawings: true
+  # true logs a line per imported drawing -- useful the first time you deploy,
+  # noise afterwards, since one mission can produce 60+ of them. The one-line
+  # import summary is logged either way, and the detail is always on
+  # /bgbridge status.
+  debug: false
   drawing_layers: [Common]
   retain_intel_on_mission_change: true
   # 0 disables expiry. When positive, measured from the last DCS-driven change,

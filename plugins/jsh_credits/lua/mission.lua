@@ -81,88 +81,136 @@ end
 --
 -- The bot decides what it is worth. Everything here just measures.
 
-if not jsh_credits.refuelHandler then
+-- Air-to-air refuelling: measured by sampling fuel, not by DCS's refuel events.
+--
+-- The event-driven version this replaces could never pay anyone, and the logs
+-- say why. Across a full evening on the Foothold server, DCS fired 13
+-- S_EVENT_REFUELING events and named the KC-135 as the initiator in every
+-- single one; of 14 stop events, exactly one named the human. So the receiver
+-- never appears on the start event, the old handler never recorded a baseline,
+-- and the one stop event it could read had nothing to settle against. DCS also
+-- delivered that stop event twice at the same timestamp.
+--
+-- Sampling sidesteps all of it. Fuel going up while airborne is a refuelling,
+-- whoever DCS decides to name.
+if not jsh_credits.fuelWatch then
 
-    jsh_credits.refuelStart = {}    -- unit name -> fuel state when the boom went in
+    -- Drop the old event handler if this mission still has one loaded, so a
+    -- server that had the previous version injected is not left with a dead
+    -- handler sitting on the event bus.
+    if jsh_credits.refuelHandler then
+        pcall(world.removeEventHandler, jsh_credits.refuelHandler)
+        jsh_credits.refuelHandler = nil
+        jsh_credits.refuelStart = nil
+    end
+
+    jsh_credits.fuelWatch = {}   -- unit name -> sampling state
 
     local KG_TO_LBS = 2.20462262185
+    local SAMPLE_SECONDS = 5
+    -- Below this a change is floating-point noise rather than fuel. On an F-16
+    -- this is worth about three pounds.
+    local EPSILON = 0.0005
+    -- Quiet samples that mean the boom is out and the session can be settled.
+    local IDLE_SAMPLES = 2
 
-    local function fuelState(unit)
-        local ok, state = pcall(function()
-            local desc = unit:getDesc() or {}
-            return { fuel = unit:getFuel(), massMax = desc.fuelMassMax or 0 }
-        end)
-        if ok and state and type(state.fuel) == 'number' and state.massMax > 0 then
-            return state
+    local function flush(state)
+        local lbs = math.floor(state.pending)
+        state.pending = 0
+        state.idle = 0
+        if lbs <= 0 then
+            return
         end
-        return nil
+        dcsbot.sendBotTable({
+            command  = 'jshCreditsRefuel',
+            name     = state.name,
+            lbs      = lbs,
+            aircraft = state.aircraft
+        })
     end
 
-    jsh_credits.refuelHandler = {}
+    --- One pass over every player aircraft.
+    --
+    -- The whole session is accumulated and sent as a single total. That is not
+    -- tidiness: the bot applies a minimum (minimum_lbs, 500 by default) before
+    -- paying anything, so a drip of five-second deltas would each fall under it
+    -- and the pilot would be paid nothing at all.
+    local function sample()
+        local seen = {}
 
-    function jsh_credits.refuelHandler:onEvent(event)
-        if not event then
-            return
-        end
-        local id = event.id
-        if id ~= world.event.S_EVENT_REFUELING and id ~= world.event.S_EVENT_REFUELING_STOP then
-            return
-        end
+        for _, side in pairs({ coalition.side.RED, coalition.side.BLUE }) do
+            for _, unit in pairs(coalition.getPlayers(side) or {}) do
+                pcall(function()
+                    if not unit:isExist() then
+                        return
+                    end
+                    local player = unit:getPlayerName()
+                    if not player or player == '' then
+                        return
+                    end
+                    local unit_name = unit:getName()
+                    seen[unit_name] = true
 
-        local ok, err = pcall(function()
-            local unit = event.initiator
-            if not unit or not unit.getPlayerName then
-                return
+                    local fuel = unit:getFuel()
+                    local desc = unit:getDesc() or {}
+                    local massMax = desc.fuelMassMax or 0
+                    if type(fuel) ~= 'number' or massMax <= 0 then
+                        return
+                    end
+
+                    local state = jsh_credits.fuelWatch[unit_name]
+                    if not state or state.name ~= player then
+                        -- First sight of this airframe, or someone else is in
+                        -- it now. Record a baseline and pay nothing for it.
+                        jsh_credits.fuelWatch[unit_name] = {
+                            name = player, fuel = fuel, pending = 0, idle = 0,
+                            aircraft = unit:getTypeName() or ''
+                        }
+                        return
+                    end
+
+                    local delta = fuel - state.fuel
+                    state.fuel = fuel
+
+                    -- inAir is what keeps ground refuelling and rearming out of
+                    -- this. Note there is deliberately no cap at a full
+                    -- internal load: getFuel() exceeds 1.0 when external tanks
+                    -- are carried, and filling those is paid for like any other
+                    -- fuel taken from a tanker.
+                    if unit:inAir() and delta > EPSILON then
+                        state.pending = state.pending + delta * massMax * KG_TO_LBS
+                        state.idle = 0
+                    elseif state.pending > 0 then
+                        state.idle = state.idle + 1
+                        if state.idle >= IDLE_SAMPLES then
+                            flush(state)
+                        end
+                    end
+                end)
             end
-            local name = unit:getPlayerName()
-            if not name or name == '' then
-                return  -- AI receiver
-            end
-            local unit_name = unit:getName()
+        end
 
-            if id == world.event.S_EVENT_REFUELING then
-                local state = fuelState(unit)
-                if state then
-                    jsh_credits.refuelStart[unit_name] =
-                        { name = name, fuel = state.fuel, massMax = state.massMax }
+        -- Anyone who left the slot mid-session: settle whatever they banked.
+        for unit_name, state in pairs(jsh_credits.fuelWatch) do
+            if not seen[unit_name] then
+                if state.pending > 0 then
+                    flush(state)
                 end
-                return
+                jsh_credits.fuelWatch[unit_name] = nil
             end
-
-            -- S_EVENT_REFUELING_STOP: the boom came out, so settle up.
-            local start = jsh_credits.refuelStart[unit_name]
-            jsh_credits.refuelStart[unit_name] = nil
-            if not start or start.name ~= name then
-                return
-            end
-            local state = fuelState(unit)
-            if not state then
-                return
-            end
-
-            -- Can be zero or negative on a disconnect with no fuel taken.
-            local lbs = math.floor((state.fuel - start.fuel) * start.massMax * KG_TO_LBS)
-            if lbs <= 0 then
-                return
-            end
-
-            local aircraft = ''
-            pcall(function() aircraft = unit:getTypeName() or '' end)
-
-            dcsbot.sendBotTable({
-                command  = 'jshCreditsRefuel',
-                name     = name,
-                lbs      = lbs,
-                aircraft = aircraft
-            })
-        end)
-
-        if not ok then
-            env.info('jsh_credits: refuel handler error: ' .. tostring(err))
         end
     end
 
-    world.addEventHandler(jsh_credits.refuelHandler)
-    env.info('jsh_credits: refuel handler registered')
+    local function tick(_, time)
+        local ok, err = pcall(sample)
+        if not ok then
+            env.info('jsh_credits: fuel sampler error: ' .. tostring(err))
+        end
+        return time + SAMPLE_SECONDS
+    end
+
+    timer.scheduleFunction(tick, nil, timer.getTime() + SAMPLE_SECONDS)
+    env.info('jsh_credits: refuel handler registered (fuel sampler, every '
+             .. SAMPLE_SECONDS .. 's)')
 
 end

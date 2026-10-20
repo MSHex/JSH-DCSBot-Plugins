@@ -1,0 +1,362 @@
+"""
+Pure logic for the Battleground bridge: marker command parsing, mission drawing
+conversion, and the shape of a bg_geometry2 payload.
+
+Nothing here imports discord, psycopg or DCSServerBot, so all of it is testable
+without a bot, a database or DCS. The parts that genuinely need those live in
+store.py and commands.py.
+
+The payload shape is not invented. It is taken from DCSBattleground's own Go
+structs at commit b3d6aed -- `DataJson`/`Author`/`Fields` in server/session.go --
+and cross-checked against what the stock battleground2 plugin writes. Getting a
+key name wrong here produces a row the website silently ignores rather than an
+error, so the names are pinned in ONE place (FIELD_DEFAULTS) and never spelled
+out again.
+"""
+import re
+
+from dataclasses import dataclass, field
+from typing import Any, Optional, Union
+
+# ----------------------------------------------------------------- limits
+#
+# The Lua transport truncates somewhere around 2,300 characters. Truncation is
+# worse than rejection: a silently shortened title looks like it worked. So the
+# parser refuses anything over INPUT_MAX and says so, well under that ceiling.
+TITLE_MAX = 160
+DESCRIPTION_MAX = 1800
+INPUT_MAX = 2200
+
+# bg_geometry2.id is a SERIAL (int4), so this is the real ceiling, not a guess.
+ID_MIN = 1
+ID_MAX = 2147483647
+
+# DCSBattleground's own delete path guards on `geo.Id > 10000` (server/http.go),
+# so bridge IDs must sit above that to be deletable through the website too.
+BRIDGE_ID_START = 1_000_000
+
+# The vocabulary the frontend actually switches on (src/, commit b3d6aed).
+# Anything outside this list renders as nothing at all.
+GEOMETRY_TYPES = frozenset({
+    'border', 'circle', 'line', 'markpoint', 'quest', 'recon', 'threat',
+    'warning', 'waypoints', 'zone',
+})
+SIDES = frozenset({'blue', 'red'})
+
+#: Every key in Fields, with the zero value the website expects. Building a
+#: payload from this (rather than writing a partial dict) means a missing key
+#: can't reach the database and confuse the Go unmarshaller.
+FIELD_DEFAULTS: dict[str, Any] = {
+    'posMGRS': '',
+    'posPoint': [],
+    'position_type': 'MGRS',
+    'screenshot': [],
+    'description': [],
+    'side': 'blue',
+    'status': 'Shared',
+    'clickable': True,
+    'hidden': False,
+    'color': '#e4e70a',
+    'subType': '',
+    'type': 'recon',
+    'points': [],
+    'pointNames': [],
+    'pointGroundFt': [],
+    'pointGroundFtSet': [],
+    'center': [],
+    'radius': 0,
+    'marker': '',
+    'groundFt': 0,
+    'groundFtSet': False,
+}
+
+#: Fields the F10 marker owns. On an update, everything else in an existing row
+#: is left exactly as the website left it -- that is what preserves notes,
+#: screenshots and colour changes made in the browser.
+MARKER_OWNED_FIELDS = ('posMGRS', 'posPoint', 'position_type', 'center')
+
+
+# ------------------------------------------------------- marker commands
+
+@dataclass(frozen=True)
+class IntelUpsert:
+    """`-intel: Title` plus any following lines as the initial description."""
+    title: str
+    description: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class DeleteThisMarker:
+    """`-intel delete` -- removes whatever this marker created."""
+
+
+@dataclass(frozen=True)
+class DeleteById:
+    """`-intel delete 1000000` -- can be typed on any marker."""
+    intel_id: int
+
+
+@dataclass(frozen=True)
+class ParseError:
+    """Recognised as ours, but unusable. The reason is shown to the player."""
+    reason: str
+
+
+MarkerCommand = Union[IntelUpsert, DeleteThisMarker, DeleteById, ParseError]
+
+#: `-intel` by default. The prefix comes from the bot's own
+#: `chat_command_prefix` (core/listener.py reads the same key), because a server
+#: that has changed it would otherwise find this plugin's commands unreachable
+#: while every other chat command works.
+KEYWORD = 'intel'
+
+
+def _command_pattern(prefix: str) -> re.Pattern:
+    return re.compile(rf'^\s*{re.escape(prefix)}{KEYWORD}\b(?P<rest>.*)$',
+                      re.IGNORECASE | re.DOTALL)
+
+
+def parse_marker_command(text: str, prefix: str = '-') -> Optional[MarkerCommand]:
+    """
+    Reads a marker's text.
+
+    Returns None when the text is not a bridge command at all -- which is the
+    overwhelmingly common case, since players use F10 markers for everything.
+    Returns ParseError when it IS ours but malformed, so the player gets told
+    rather than being left wondering.
+    """
+    if not text:
+        return None
+    match = _command_pattern(prefix).match(text)
+    if not match:
+        return None
+
+    if len(text) > INPUT_MAX:
+        return ParseError(f"that command is {len(text)} characters; the limit is {INPUT_MAX}")
+
+    rest = match.group('rest')
+    first_line, _, following = rest.partition('\n')
+    first_line = first_line.strip()
+
+    # -intel delete [id]
+    delete = re.match(r'^delete\s*(?P<id>\S+)?$', first_line, re.IGNORECASE)
+    if delete:
+        raw_id = delete.group('id')
+        if raw_id is None:
+            return DeleteThisMarker()
+        if not raw_id.isdigit():
+            return ParseError(f"`{raw_id}` is not an intel ID")
+        intel_id = int(raw_id)
+        if not ID_MIN <= intel_id <= ID_MAX:
+            return ParseError(f"intel ID {intel_id} is out of range")
+        return DeleteById(intel_id)
+
+    # -intel: Title
+    if not first_line.startswith(':'):
+        return ParseError(f"use `{prefix}{KEYWORD}: <title>` or `{prefix}{KEYWORD} delete [id]`")
+
+    title = first_line[1:].strip()
+    if not title:
+        return ParseError("that report needs a title")
+    if len(title) > TITLE_MAX:
+        return ParseError(f"that title is {len(title)} characters; the limit is {TITLE_MAX}")
+
+    description = [line.rstrip() for line in following.split('\n')] if following else []
+    while description and not description[-1]:
+        description.pop()
+    joined = '\n'.join(description)
+    if len(joined) > DESCRIPTION_MAX:
+        return ParseError(
+            f"that description is {len(joined)} characters; the limit is {DESCRIPTION_MAX}")
+
+    return IntelUpsert(title=title, description=description)
+
+
+# --------------------------------------------------------- recon payloads
+
+def build_recon_payload(title: str, author_name: str, mgrs: str, lat: float, lon: float,
+                        description: list[str], intel_id: int, reported_at: str,
+                        side: str = 'blue', author_icon: str = '') -> dict:
+    """
+    A native Battleground recon record.
+
+    posPoint carries [lat, lon] in Leaflet's order, which is what the website's
+    own editor writes. Of everything in this plugin that is the one value worth
+    checking against the game on a live server, because a swapped pair puts the
+    report somewhere plausible rather than somewhere obviously wrong.
+    """
+    fields = dict(FIELD_DEFAULTS)
+    fields.update({
+        'posMGRS': mgrs,
+        'posPoint': [lat, lon],
+        'position_type': 'MGRS',
+        'side': side if side in SIDES else 'blue',
+        'type': 'recon',
+        'description': _initial_description(description, intel_id, author_name, reported_at),
+    })
+    return {
+        'title': title,
+        'author': {'name': author_name, 'icon_url': author_icon},
+        'fields': fields,
+    }
+
+
+def _initial_description(lines: list[str], intel_id: int, author_name: str,
+                         reported_at: str) -> list[str]:
+    """
+    `description` is an array of strings, not a string -- so the provenance line
+    is its own entry and the player's own lines stay separate and editable.
+    """
+    header = f"Intel #{intel_id} - reported by {author_name} at {reported_at}"
+    return [header] + [line for line in lines if line]
+
+
+def merge_marker_update(existing: dict, title: str, mgrs: str, lat: float,
+                        lon: float) -> dict:
+    """
+    Apply a marker edit to a row the website may have enriched since.
+
+    Only the title and the position are taken from DCS. Descriptions,
+    screenshots, colour and status are whatever the browser last wrote, which is
+    the explicit requirement: editing a marker must never wipe someone's notes.
+
+    The incoming `existing` is the row as stored, so an unknown future field
+    added by a later Battleground version survives untouched rather than being
+    dropped by a rebuild from defaults.
+    """
+    merged = dict(existing)
+    merged['title'] = title
+
+    fields = dict(FIELD_DEFAULTS)
+    fields.update(merged.get('fields') or {})
+    fields['posMGRS'] = mgrs
+    fields['posPoint'] = [lat, lon]
+    fields['position_type'] = 'MGRS'
+    merged['fields'] = fields
+    return merged
+
+
+# ------------------------------------------------------- drawing import
+
+@dataclass(frozen=True)
+class Converted:
+    kind: str
+    payload: dict
+    approximated: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class Unsupported:
+    name: str
+    primitive: str
+    reason: str
+
+
+def convert_drawing(drawing: dict, author_name: str, side: str = 'blue') -> Union[
+        Converted, Unsupported]:
+    """
+    Turn one entry from the mission plugin's `getMissionDrawings` into a
+    Battleground geometry payload.
+
+    That interface already converts to lat/lng with Terrain.convertMetersToLatLon
+    and gives absolute `points`, so there is no coordinate maths to get wrong
+    here and no custom Lua needed for this half of the plugin.
+
+    Anything this cannot represent comes back as Unsupported with a reason, to
+    be counted and named in the import summary. Inventing geometry for a shape
+    DCS did not export is worse than skipping it: a wrong line on a map gets
+    briefed as if it were real.
+    """
+    name = str(drawing.get('name') or 'Unnamed')
+    primitive = str(drawing.get('primitiveType') or 'Unknown')
+    points = _latlon_list(drawing.get('points'))
+    location = drawing.get('location') or {}
+    centre = ([location['lat'], location['lng']]
+              if isinstance(location, dict) and 'lat' in location and 'lng' in location
+              else None)
+
+    def payload(kind: str, **extra) -> dict:
+        fields = dict(FIELD_DEFAULTS)
+        fields.update({'type': kind, 'side': side, 'clickable': True})
+        fields.update(extra)
+        return {'title': name, 'author': {'name': author_name, 'icon_url': ''},
+                'fields': fields}
+
+    if primitive == 'Line':
+        if len(points) < 2:
+            return Unsupported(name, primitive, 'no exported vertices')
+        closed = bool(drawing.get('closed'))
+        kind = 'zone' if closed else 'line'
+        approximated = None
+        # DCS can draw segmented and curved line modes. The vertices are what
+        # the mission exports, so a curve arrives as its control points and is
+        # drawn straight between them.
+        if str(drawing.get('lineMode') or '').lower() not in ('', 'segments', 'segmented'):
+            approximated = f"lineMode '{drawing.get('lineMode')}' drawn as straight segments"
+        return Converted(kind, payload(kind, points=points), approximated)
+
+    if primitive == 'Polygon':
+        mode = str(drawing.get('polygonMode') or '').lower()
+        radius = _number(drawing.get('radius'))
+        if mode == 'circle' and centre and radius:
+            return Converted('circle', payload('circle', center=centre, radius=radius))
+        if len(points) >= 3:
+            approximated = (f"polygonMode '{mode}' approximated from its vertices"
+                            if mode in ('rect', 'oval', 'arrow') else None)
+            return Converted('zone', payload('zone', points=points), approximated)
+        # rect/oval drawn without exported vertices: DCS describes them by
+        # width/height/r1/r2 and an angle instead, which would have to be
+        # re-derived. Out of scope for v1, and named in the summary.
+        return Unsupported(name, primitive,
+                           f"polygonMode '{mode}' has no exported vertices")
+
+    if primitive in ('TextBox', 'Icon'):
+        if not centre:
+            return Unsupported(name, primitive, 'no origin')
+        text = str(drawing.get('text') or '').strip()
+        title = text or name
+        fields_extra: dict[str, Any] = {'posPoint': centre, 'position_type': 'POINT'}
+        converted = payload('markpoint', **fields_extra)
+        converted['title'] = title[:TITLE_MAX]
+        note = ('text box rendered as a labelled point'
+                if primitive == 'TextBox' else 'icon rendered as a labelled point')
+        return Converted('markpoint', converted, note)
+
+    return Unsupported(name, primitive, 'unsupported primitive type')
+
+
+def _latlon_list(value: Any) -> list[list[float]]:
+    if not isinstance(value, list):
+        return []
+    out: list[list[float]] = []
+    for item in value:
+        if isinstance(item, dict) and 'lat' in item and 'lng' in item:
+            out.append([float(item['lat']), float(item['lng'])])
+    return out
+
+
+def _number(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+@dataclass
+class ImportSummary:
+    """What a drawing import actually did, for `/bgbridge status` and the log."""
+    imported: int = 0
+    approximated: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    removed: int = 0
+    layers: list[str] = field(default_factory=list)
+
+    def describe(self) -> str:
+        parts = [f"{self.imported} imported"]
+        if self.removed:
+            parts.append(f"{self.removed} replaced")
+        if self.approximated:
+            parts.append(f"{len(self.approximated)} approximated")
+        if self.skipped:
+            parts.append(f"{len(self.skipped)} skipped")
+        return ', '.join(parts)

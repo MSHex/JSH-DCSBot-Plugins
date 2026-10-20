@@ -281,9 +281,11 @@ def convert_drawing(drawing: dict, author_name: str, side: str = 'blue') -> Unio
               if isinstance(location, dict) and 'lat' in location and 'lng' in location
               else None)
 
+    colour = parse_dcs_colour(drawing.get('colorString')) or FIELD_DEFAULTS['color']
+
     def payload(kind: str, **extra) -> dict:
         fields = dict(FIELD_DEFAULTS)
-        fields.update({'type': kind, 'side': side, 'clickable': True})
+        fields.update({'type': kind, 'side': side, 'clickable': True, 'color': colour})
         fields.update(extra)
         return {'title': name, 'author': {'name': author_name, 'icon_url': ''},
                 'fields': fields}
@@ -336,6 +338,29 @@ def convert_drawing(drawing: dict, author_name: str, side: str = 'blue') -> Unio
         return Converted('markpoint', converted, note)
 
     return Unsupported(name, primitive, 'unsupported primitive type')
+
+
+#: DCS writes a drawing's colour as 0xRRGGBBAA. Confirmed against a real
+#: mission rather than assumed: 0xff0000ff and 0x0000ffff dominate its Common
+#: layer, which read as opaque red and opaque blue, and the outline-only boxes
+#: carry fillColorString 0xff000000 -- red at zero alpha. Any other byte order
+#: would make those nonsense.
+_COLOUR_RE = re.compile(r'^0x([0-9a-f]{6})([0-9a-f]{2})?$', re.IGNORECASE)
+
+
+def parse_dcs_colour(value: Any) -> Optional[str]:
+    """
+    A DCS colorString as the CSS colour Battleground expects, or None.
+
+    The alpha byte is dropped. Battleground geometry carries a single `color`
+    field used for the outline, with its own fill rules, so there is nowhere for
+    a separate fill colour or an opacity to go -- and a shape whose fill is
+    transparent still needs a visible outline.
+    """
+    if not isinstance(value, str):
+        return None
+    match = _COLOUR_RE.match(value.strip())
+    return f"#{match.group(1).lower()}" if match else None
 
 
 def _rect_corners(centre: list[float], width: float, height: float,

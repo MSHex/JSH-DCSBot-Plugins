@@ -81,8 +81,30 @@ the first successful initialisation after a bot restart, and on
 | Circle (centre + radius) | `circle` | |
 | Text box | `markpoint` | Labelled with its text. Font and appearance are not reproduced. |
 | Icon | `markpoint` | Labelled with its name. The DCS icon artwork is not reproduced. |
-| Rectangle / ellipse **without** exported vertices | *skipped* | DCS describes these by width/height/angle instead. Deriving corners is out of scope for v1. |
+| Rectangle | `zone` | DCS exports no vertices for these; the corners are derived from `width`, `height` and `angle`. See below. |
+| Ellipse / arrow | *skipped* | Described by `r1`/`r2`/`length` rather than width and height. Not guessed at. |
 | Anything else | *skipped* | |
+
+### Derived rectangles
+
+A DCS rectangle is stored as a point plus `width`, `height` and `angle`, with no
+corner list at all, so its four corners have to be calculated. Three things had
+to be settled first, and all three were settled against a real mission
+(`Egypt_Went_Rogue` 1.3.8, 50 rects on its Common layer) rather than assumed:
+
+- **`mapX`/`mapY` is the centre, not a corner.** Measured by counting how many
+  mission units each interpretation encloses: centre placed units inside 15 of
+  65 rects and enclosed 490 units; corner managed 10 rects and 139 units.
+- **`height` runs north-south, `width` east-west.** The same test preferred this
+  on all rects, on elongated ones, and on very elongated ones, where
+  orientation matters most.
+- **`angle` is degrees anticlockwise** about the centre.
+
+Corner offsets are converted to degrees with a flat local approximation rather
+than the terrain's true projection, since the only exact converter lives in the
+mission environment and drawings arrive already converted. Over a box of a few
+kilometres that costs a couple of metres, which is why rectangles are reported
+as approximated rather than exact.
 
 Skipped and approximated shapes are **named and counted** in the log and in
 `/bgbridge status`. Nothing is converted into invented geometry: a wrong line on
@@ -195,7 +217,7 @@ python3 tests/bgb_sql_check.py "host=/tmp port=5433 dbname=bgbtest user=postgres
 Point that at a disposable database. It inserts, updates and deletes, and it
 runs every statement the plugin uses through `PREPARE` against the live schema.
 
-**What was actually run:** 51 pure-logic assertions, and 20 SQL assertions
+**What was actually run:** 59 pure-logic assertions, and 20 SQL assertions
 against PostgreSQL 16.15 — covering the create/update/delete lifecycle,
 ownership, cross-server rejection, receipt idempotency, deletion replay
 protection, expiry, and preservation of website descriptions and screenshots.

@@ -7,6 +7,7 @@ drawing conversion.
 The SQL is covered separately by tests/bgb_sql_check.py, which needs a real
 PostgreSQL instance. Neither suite touches DCS or DCSBattleground.
 """
+import math
 import sys
 
 from pathlib import Path
@@ -218,16 +219,92 @@ class TestDrawingConversion:
         assert result.kind == 'zone'
         assert result.approximated is None
 
-    def test_rectangle_without_vertices_is_skipped_not_invented(self):
-        """
-        DCS describes a rect by width/height/angle. Deriving corners is out of
-        scope for v1, and a made-up box briefed as real is worse than a gap.
-        """
+    def test_rectangle_without_vertices_is_derived(self):
         result = d.convert_drawing({'name': 'Box', 'primitiveType': 'Polygon',
                                     'polygonMode': 'rect', 'width': 1000, 'height': 500,
-                                    'location': {'lat': 1.0, 'lng': 2.0}}, 'JSH')
+                                    'angle': 0, 'location': {'lat': 30.0, 'lng': 32.0}}, 'JSH')
+        assert isinstance(result, d.Converted)
+        assert result.kind == 'zone'
+        assert result.approximated and 'derived' in result.approximated
+        assert len(result.payload['fields']['points']) == 5      # closed ring
+
+    def test_oval_is_still_skipped(self):
+        """r1/r2/length, not width/height. Not guessed at."""
+        result = d.convert_drawing({'name': 'Oval', 'primitiveType': 'Polygon',
+                                    'polygonMode': 'oval', 'r1': 100, 'r2': 50,
+                                    'location': {'lat': 30.0, 'lng': 32.0}}, 'JSH')
         assert isinstance(result, d.Unsupported)
-        assert 'rect' in result.reason
+
+    def test_rect_without_dimensions_is_skipped(self):
+        result = d.convert_drawing({'name': 'Box', 'primitiveType': 'Polygon',
+                                    'polygonMode': 'rect',
+                                    'location': {'lat': 30.0, 'lng': 32.0}}, 'JSH')
+        assert isinstance(result, d.Unsupported)
+
+
+class TestRectGeometry:
+    """
+    The derived corners have to come back out at the size DCS put in.
+
+    Values are from Egypt_Went_Rogue 1.3.8, drawing `Polygon-2-1-1-1-1-1`.
+    """
+    WIDTH, HEIGHT, ANGLE = 3822.281059557, 2805.4860938688, 356.0
+    CENTRE = [30.0, 32.0]
+
+    @staticmethod
+    def metres_between(a, b, latitude=30.0):
+        north = (b[0] - a[0]) * d.METRES_PER_DEGREE
+        east = (b[1] - a[1]) * d.METRES_PER_DEGREE * math.cos(math.radians(latitude))
+        return math.hypot(north, east)
+
+    def corners(self, angle=None):
+        return d._rect_corners(self.CENTRE, self.WIDTH, self.HEIGHT,
+                               self.ANGLE if angle is None else angle)
+
+    def test_ring_is_closed(self):
+        corners = self.corners()
+        assert len(corners) == 5
+        assert corners[0] == corners[-1]
+
+    def test_sides_match_the_stored_dimensions(self):
+        corners = self.corners()
+        # corner order is (+N+E), (+N-E), (-N-E), (-N+E)
+        assert self.metres_between(corners[0], corners[1]) == pytest.approx(self.WIDTH, rel=1e-3)
+        assert self.metres_between(corners[1], corners[2]) == pytest.approx(self.HEIGHT, rel=1e-3)
+        assert self.metres_between(corners[2], corners[3]) == pytest.approx(self.WIDTH, rel=1e-3)
+
+    def test_diagonals_match(self):
+        corners = self.corners()
+        expected = math.hypot(self.WIDTH, self.HEIGHT)
+        assert self.metres_between(corners[0], corners[2]) == pytest.approx(expected, rel=1e-3)
+        assert self.metres_between(corners[1], corners[3]) == pytest.approx(expected, rel=1e-3)
+
+    def test_rotation_preserves_size(self):
+        """Turning the box must not stretch it."""
+        for angle in (0, 45, 90, 180, 356):
+            corners = self.corners(angle)
+            assert self.metres_between(corners[0], corners[1]) == pytest.approx(
+                self.WIDTH, rel=1e-3)
+            assert self.metres_between(corners[1], corners[2]) == pytest.approx(
+                self.HEIGHT, rel=1e-3)
+
+    def test_unrotated_box_is_axis_aligned(self):
+        """height runs north-south, width east-west -- the settled convention."""
+        corners = self.corners(0)
+        assert corners[0][0] == pytest.approx(corners[1][0])      # same latitude
+        assert corners[0][1] == pytest.approx(corners[3][1])      # same longitude
+        north_south = self.metres_between(corners[0], corners[3])
+        east_west = self.metres_between(corners[0], corners[1])
+        assert north_south == pytest.approx(self.HEIGHT, rel=1e-3)
+        assert east_west == pytest.approx(self.WIDTH, rel=1e-3)
+
+    def test_centred_not_cornered(self):
+        """The centre must sit in the middle, not on an edge."""
+        corners = self.corners(0)
+        mean_lat = sum(c[0] for c in corners[:4]) / 4
+        mean_lon = sum(c[1] for c in corners[:4]) / 4
+        assert mean_lat == pytest.approx(self.CENTRE[0], abs=1e-9)
+        assert mean_lon == pytest.approx(self.CENTRE[1], abs=1e-9)
 
     def test_rectangle_with_vertices_is_approximated(self):
         result = d.convert_drawing({'name': 'Box', 'primitiveType': 'Polygon',

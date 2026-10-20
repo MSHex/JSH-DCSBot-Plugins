@@ -85,6 +85,18 @@ the first successful initialisation after a bot restart, and on
 | Ellipse / arrow | *skipped* | Described by `r1`/`r2`/`length` rather than width and height. Not guessed at. |
 | Anything else | *skipped* | |
 
+### Colours
+
+A drawing keeps the colour it has in the Mission Editor. DCS stores it as
+`0xRRGGBBAA` and only the RGB is used: Battleground geometry has a single
+`color` field for the outline with its own fill rules, so there is nowhere for
+a separate fill colour or an opacity to go — and an outline-only box still
+needs a visible outline.
+
+Anything missing or unparseable falls back to the default yellow rather than
+failing the import. Marker intel is unaffected; a report has no mission colour
+and keeps the recon default.
+
 ### Derived rectangles
 
 A DCS rectangle is stored as a point plus `width`, `height` and `angle`, with no
@@ -217,7 +229,7 @@ python3 tests/bgb_sql_check.py "host=/tmp port=5433 dbname=bgbtest user=postgres
 Point that at a disposable database. It inserts, updates and deletes, and it
 runs every statement the plugin uses through `PREPARE` against the live schema.
 
-**What was actually run:** 59 pure-logic assertions, and 20 SQL assertions
+**What was actually run:** 80 pure-logic assertions, and 20 SQL assertions
 against PostgreSQL 16.15 — covering the create/update/delete lifecycle,
 ownership, cross-server rejection, receipt idempotency, deletion replay
 protection, expiry, and preservation of website descriptions and screenshots.

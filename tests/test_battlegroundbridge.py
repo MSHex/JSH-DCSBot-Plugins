@@ -349,6 +349,56 @@ class TestRectGeometry:
             assert result.kind in d.GEOMETRY_TYPES
 
 
+class TestColours:
+    """
+    DCS writes 0xRRGGBBAA. The real campaign mission's Common layer is almost
+    entirely 0xff0000ff and 0x0000ffff -- opaque red and opaque blue -- which is
+    what pins the byte order down.
+    """
+
+    @pytest.mark.parametrize('value,expected', [
+        ('0xff0000ff', '#ff0000'),      # opaque red, 38 polygons in the mission
+        ('0x0000ffff', '#0000ff'),      # opaque blue, 12 polygons
+        ('0x0080ffff', '#0080ff'),      # light blue text box
+        ('0xff000000', '#ff0000'),      # red at zero alpha: outline-only fill
+        ('0xFF0000FF', '#ff0000'),      # case insensitive
+        ('0xabcdef', '#abcdef'),        # alpha byte optional
+        ('  0xff0000ff  ', '#ff0000'),
+    ])
+    def test_parses(self, value, expected):
+        assert d.parse_dcs_colour(value) == expected
+
+    @pytest.mark.parametrize('value', [
+        None, '', 'red', '#ff0000', '0xff00', '0xff0000fff', 'ff0000ff', 0xff0000ff, {},
+    ])
+    def test_rejects(self, value):
+        assert d.parse_dcs_colour(value) is None
+
+    def test_drawing_takes_the_mission_colour(self):
+        result = d.convert_drawing(line([(1, 2), (3, 4)], colorString='0x0000ffff'), 'JSH')
+        assert result.payload['fields']['color'] == '#0000ff'
+
+    def test_rect_takes_it_too(self):
+        result = d.convert_drawing({'name': 'Box', 'primitiveType': 'Polygon',
+                                    'polygonMode': 'rect', 'width': 1000, 'height': 500,
+                                    'angle': 0, 'colorString': '0xff0000ff',
+                                    'location': {'lat': 30.0, 'lng': 32.0}}, 'JSH')
+        assert result.payload['fields']['color'] == '#ff0000'
+
+    def test_missing_colour_falls_back_to_the_default(self):
+        result = d.convert_drawing(line([(1, 2), (3, 4)]), 'JSH')
+        assert result.payload['fields']['color'] == d.FIELD_DEFAULTS['color']
+
+    def test_unparseable_colour_falls_back_rather_than_breaking(self):
+        result = d.convert_drawing(line([(1, 2), (3, 4)], colorString='chartreuse'), 'JSH')
+        assert result.payload['fields']['color'] == d.FIELD_DEFAULTS['color']
+
+    def test_intel_is_unaffected(self):
+        """Markers have no mission colour; reports keep the recon default."""
+        payload = d.build_recon_payload('T', 'Curse', 'M', 1.0, 2.0, [], 1, 't')
+        assert payload['fields']['color'] == d.FIELD_DEFAULTS['color']
+
+
 class TestImportSummary:
     def test_describe(self):
         summary = d.ImportSummary(imported=12, removed=5, approximated=['a'], skipped=['b', 'c'])

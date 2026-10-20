@@ -213,7 +213,8 @@ class BattlegroundBridge(Plugin[BridgeEventListener]):
                 server.name, token, marker_id, sequence,
                 title=command.title, description=command.description,
                 mgrs=raw['mgrs'], lat=float(raw['lat']), lon=float(raw['lon']),
-                ucid=ucid, player_name=name)
+                ucid=ucid, player_name=name,
+                rings=self.get_config(server).get('threat_rings'))
             await self.notify(player, self.describe(outcome))
             return True
 
@@ -309,7 +310,8 @@ class BattlegroundBridge(Plugin[BridgeEventListener]):
             return ImportSummary()
         summary = await self.store.replace_drawings(
             server.name, token, _clean(result.get('drawings') or {}), layers,
-            author_name='Mission', side='blue')
+            author_name='Mission', side='blue',
+            rings=config.get('threat_rings'))
         self.last_import[server.name] = summary
         self.log.info(f"BgBridge: {server.name}: drawings -- {summary.describe()}")
         for note in summary.skipped:

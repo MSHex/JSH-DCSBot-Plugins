@@ -399,6 +399,83 @@ class TestColours:
         assert payload['fields']['color'] == d.FIELD_DEFAULTS['color']
 
 
+SYSTEMS = {'SA-5': 297100, 'SA-10': 119265, 'SA-11': 51275, 'SA-1': 25000}
+
+
+class TestThreatSystemMatching:
+    """
+    The radii are seeded from the rings JSH already drew by hand, so a generated
+    ring sits on top of the manual one rather than disagreeing with it.
+    """
+
+    @pytest.mark.parametrize('title,system', [
+        ('SA-10', 'SA-10'),
+        ('SA-10 site', 'SA-10'),
+        ('Suspected SA-10', 'SA-10'),
+        ('sa-10 near the road', 'SA-10'),
+        ('SA10', 'SA-10'),
+        ('SA 10', 'SA-10'),
+        ('sa10 DESTROYED', 'SA-10'),
+        ('two SA-11 launchers', 'SA-11'),
+        ('SA-5 battery', 'SA-5'),
+    ])
+    def test_matches(self, title, system):
+        result = d.match_threat_system(title, SYSTEMS)
+        assert result is not None and result[0] == system
+        assert result[1] == SYSTEMS[system]
+
+    def test_longer_designation_wins(self):
+        """
+        The trap: with SA-1 also configured, SA-10 and SA-11 must not be
+        matched as SA-1 and given a 25 km ring instead of 119 km.
+        """
+        assert d.match_threat_system('SA-10 site', SYSTEMS)[0] == 'SA-10'
+        assert d.match_threat_system('SA-11 site', SYSTEMS)[0] == 'SA-11'
+        assert d.match_threat_system('SA-1 site', SYSTEMS)[0] == 'SA-1'
+
+    @pytest.mark.parametrize('title', [
+        'SA-100', 'SA-1000', 'XSA-10', 'SA-12', 'convoy', '', 'Shilka',
+    ])
+    def test_non_matches(self, title):
+        assert d.match_threat_system(title, SYSTEMS) is None
+
+    @pytest.mark.parametrize('title', [
+        'SA-10 Range', 'SA-11 RING', 'SA-5 mez', 'SA-10 WEZ',
+    ])
+    def test_titles_that_already_describe_a_ring_are_skipped(self, title):
+        """Otherwise a hand-drawn 'SA-10 Range' acquires a ring of its own."""
+        assert d.match_threat_system(title, SYSTEMS) is None
+
+    def test_zero_or_missing_radius_does_not_match(self):
+        assert d.match_threat_system('SA-10', {'SA-10': 0}) is None
+        assert d.match_threat_system('SA-10', {'SA-10': 'wide'}) is None
+
+    def test_empty_config_matches_nothing(self):
+        assert d.match_threat_system('SA-10 site', {}) is None
+
+
+class TestRingPayload:
+    def test_shape(self):
+        payload = d.build_ring_payload('SA-10', 119265, [30.5, 32.5], 'Curse')
+        assert payload['title'] == 'SA-10 Range'
+        assert payload['fields']['type'] == 'circle'
+        assert payload['fields']['center'] == [30.5, 32.5]
+        assert payload['fields']['radius'] == 119265
+        assert payload['fields']['side'] == 'blue'
+        assert set(payload['fields']) == set(d.FIELD_DEFAULTS)
+
+    def test_custom_label_and_colour(self):
+        payload = d.build_ring_payload('SA-11', 51275, [1.0, 2.0], 'M',
+                                       colour='#00ff00', label='{name} threat')
+        assert payload['title'] == 'SA-11 threat'
+        assert payload['fields']['color'] == '#00ff00'
+
+    def test_generated_ring_would_not_match_itself(self):
+        """A ring's own title must never produce a second ring."""
+        payload = d.build_ring_payload('SA-10', 119265, [1.0, 2.0], 'M')
+        assert d.match_threat_system(payload['title'], SYSTEMS) is None
+
+
 class TestImportSummary:
     def test_describe(self):
         summary = d.ImportSummary(imported=12, removed=5, approximated=['a'], skipped=['b', 'c'])

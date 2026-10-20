@@ -67,9 +67,17 @@ FIND_ITEM_BY_GEOMETRY = """
 
 INSERT_ITEM = """
     INSERT INTO bgb_items (server_name, mission_token, kind, marker_id, geometry_id,
-                           owner_ucid, owner_name, title)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                           owner_ucid, owner_name, title, parent_id)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     RETURNING id
+"""
+
+#: The generated ring belonging to one intel report, if it still has one.
+FIND_RING_BY_PARENT = """
+    SELECT id, geometry_id, title
+      FROM bgb_items
+     WHERE parent_id = %s AND kind = 'ring' AND deleted_at IS NULL
+     FOR UPDATE
 """
 
 TOUCH_ITEM_CONTENT = """

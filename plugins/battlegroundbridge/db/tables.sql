@@ -41,7 +41,12 @@ CREATE TABLE IF NOT EXISTS bgb_items (
     id SERIAL PRIMARY KEY,
     server_name TEXT NOT NULL,
     mission_token TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('intel', 'drawing')),
+    -- 'ring' is a generated threat circle. Rings derived from mission
+    -- drawings are stored as 'drawing' instead, because the drawing import
+    -- replaces its own work wholesale and they need no separate lifecycle.
+    -- Only a ring attached to marker intel needs to track its parent.
+    kind TEXT NOT NULL CHECK (kind IN ('intel', 'drawing', 'ring')),
+    parent_id INTEGER REFERENCES bgb_items (id) ON DELETE CASCADE,
     marker_id INTEGER,
     geometry_id INTEGER NOT NULL,
     owner_ucid TEXT,
@@ -64,6 +69,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS bgb_items_marker_uq
 
 CREATE INDEX IF NOT EXISTS bgb_items_live_idx
     ON bgb_items (server_name, kind) WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS bgb_items_parent_idx
+    ON bgb_items (parent_id) WHERE parent_id IS NOT NULL AND deleted_at IS NULL;
 
 -- Processed event sequences, so a retry after a commit is a no-op and a retry
 -- before one still runs. The sequence number comes from the mission, which

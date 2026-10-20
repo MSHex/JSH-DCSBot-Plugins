@@ -21,6 +21,26 @@ DEFAULT:
   # 0 disables expiry. When positive, measured from the last DCS-driven change,
   # so edits made on the website never extend a report's life.
   intel_expiry_hours: 0
+  # Draw a threat ring around anything whose title names a SAM system -- both
+  # pilot-reported intel and imported mission labels. Rings follow a marker
+  # that moves and vanish when its title stops naming a system.
+  #
+  # Radii are metres and are a DOCTRINE choice, not a physical constant: these
+  # seed values are the ones JSH was already drawing by hand. Edit them, and
+  # add systems, freely. Matching is case-insensitive and tolerates SA-10,
+  # SA10 and SA 10; longer designations win, so SA-10 is never matched as SA-1.
+  threat_rings:
+    enabled: false
+    colour: "#ff0000"
+    label: "{name} Range"
+    # Titles matching this never get a ring, so a point already describing a
+    # ring does not acquire one of its own.
+    skip_pattern: '\b(range|ring|mez|wez)\b'
+    systems:
+      SA-5: 297100
+      SA-10: 119265
+      SA-11: 51275
+
   admin_roles: [DCS Admin, GameMaster]
   # UCIDs that may manage other players' reports even without a linked Discord
   # account. Real UCIDs must never be committed to a repository.

@@ -38,9 +38,12 @@ DEFAULT:
     skip_pattern: '\b(range|ring|coverage|envelope|umbrella|mez|wez)\b'
     systems:
       # A plain number is a radius in metres, using the colour and label above.
-      SA-5: 297100
-      SA-10: 119265
-      SA-11: 51275
+      # Decimals are fine -- these are the exact radii of the circles already
+      # drawn by hand on the JSH map, so a generated ring lands precisely on
+      # top of the manual one.
+      SA-5: 297100.22
+      SA-10: 119265.836
+      SA-11: 51275.52
       #
       # A mapping overrides the colour and wording, which is how FRIENDLY
       # coverage is told apart from enemy threat. Note that only the colour

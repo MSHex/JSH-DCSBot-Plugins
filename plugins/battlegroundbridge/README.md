@@ -148,14 +148,41 @@ seed values are the ones JSH was already drawing by hand, so a generated ring
 lands on top of the manual one instead of disagreeing with it. Edit them and
 add systems freely.
 
+### Friendly coverage
+
+A system's value can be a mapping instead of a plain radius, overriding the
+colour and the wording — which is how friendly coverage is distinguished from
+enemy threat:
+
+```yaml
+systems:
+  SA-10: 119265
+  Patriot:
+    radius: 160000
+    colour: "#0068ff"
+    label: "{name} Coverage"
+```
+
+Only the **colour** changes. Every ring is written to the same coalition as the
+rest of the server's geometry, because a ring written to the other side would
+simply be invisible to the pilots who need it.
+
+The sample config ships friendly systems commented out. Unlike the SA-5/10/11
+radii, which came off the JSH map, those are starting points rather than
+measured values — set them to whatever your briefings assume before enabling
+them.
+
 Matching is case-insensitive and accepts `SA-10`, `SA10` and `SA 10`. Longer
 designations win, so a config containing both `SA-1` and `SA-10` never gives an
 SA-10 the shorter one's radius — and `SA-100` matches neither.
 
 Rings attach to **point features only**: intel reports and markpoints, never
-zones, lines or circles. A title that already describes a ring (`SA-10 Range`,
-anything matching `skip_pattern`) never gets one, so hand-drawn range circles
-and the plugin's own rings are both left alone.
+zones, lines or circles. A title that already describes a ring never gets
+one, so hand-drawn range circles and the plugin's own rings are both left
+alone. `skip_pattern` has to cover the wording your labels use — `coverage` is
+in the default list precisely because friendly rings are labelled
+`<name> Coverage`, and without it a mission label reading `Patriot Coverage`
+would be given a ring of its own.
 
 An intel ring follows its report. Move the marker and the ring moves; retitle
 `SA-10` to `empty revetment` and the ring disappears; delete the report and the
@@ -266,7 +293,7 @@ python3 tests/bgb_sql_check.py "host=/tmp port=5433 dbname=bgbtest user=postgres
 Point that at a disposable database. It inserts, updates and deletes, and it
 runs every statement the plugin uses through `PREPARE` against the live schema.
 
-**What was actually run:** 106 pure-logic assertions, and 20 SQL assertions
+**What was actually run:** 114 pure-logic assertions, and 20 SQL assertions
 against PostgreSQL 16.15 — covering the create/update/delete lifecycle,
 ownership, cross-server rejection, receipt idempotency, deletion replay
 protection, expiry, and preservation of website descriptions and screenshots.

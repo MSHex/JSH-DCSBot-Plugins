@@ -421,17 +421,17 @@ class TestThreatSystemMatching:
     ])
     def test_matches(self, title, system):
         result = d.match_threat_system(title, SYSTEMS)
-        assert result is not None and result[0] == system
-        assert result[1] == SYSTEMS[system]
+        assert result is not None and result.system == system
+        assert result.radius == SYSTEMS[system]
 
     def test_longer_designation_wins(self):
         """
         The trap: with SA-1 also configured, SA-10 and SA-11 must not be
         matched as SA-1 and given a 25 km ring instead of 119 km.
         """
-        assert d.match_threat_system('SA-10 site', SYSTEMS)[0] == 'SA-10'
-        assert d.match_threat_system('SA-11 site', SYSTEMS)[0] == 'SA-11'
-        assert d.match_threat_system('SA-1 site', SYSTEMS)[0] == 'SA-1'
+        assert d.match_threat_system('SA-10 site', SYSTEMS).system == 'SA-10'
+        assert d.match_threat_system('SA-11 site', SYSTEMS).system == 'SA-11'
+        assert d.match_threat_system('SA-1 site', SYSTEMS).system == 'SA-1'
 
     @pytest.mark.parametrize('title', [
         'SA-100', 'SA-1000', 'XSA-10', 'SA-12', 'convoy', '', 'Shilka',
@@ -454,9 +454,59 @@ class TestThreatSystemMatching:
         assert d.match_threat_system('SA-10 site', {}) is None
 
 
+class TestFriendlyCoverage:
+    """
+    A system's value may be a mapping, which is how friendly coverage gets its
+    own colour and wording without needing a separate list.
+    """
+
+    MIXED = {
+        'SA-10': 119265,
+        'Patriot': {'radius': 160000, 'colour': '#0068ff', 'label': '{name} Coverage'},
+        'Hawk': {'radius': 40000, 'color': '#0068ff'},        # US spelling accepted
+    }
+
+    def test_enemy_system_keeps_the_defaults(self):
+        ring = d.match_threat_system('SA-10 site', self.MIXED)
+        assert ring.colour == d.DEFAULT_RING_COLOUR
+        assert ring.title == 'SA-10 Range'
+
+    def test_friendly_system_overrides_colour_and_label(self):
+        ring = d.match_threat_system('Patriot battery', self.MIXED)
+        assert ring.radius == 160000
+        assert ring.colour == '#0068ff'
+        assert ring.title == 'Patriot Coverage'
+
+    def test_either_spelling_of_colour(self):
+        assert d.match_threat_system('Hawk site', self.MIXED).colour == '#0068ff'
+
+    def test_label_falls_back_when_only_colour_is_given(self):
+        assert d.match_threat_system('Hawk site', self.MIXED).title == 'Hawk Range'
+
+    def test_mapping_without_a_radius_does_not_match(self):
+        assert d.match_threat_system('Patriot', {'Patriot': {'colour': '#0068ff'}}) is None
+
+    def test_global_defaults_are_overridable(self):
+        ring = d.match_threat_system('SA-10', {'SA-10': 1000},
+                                     colour='#00ff00', label='{name} WEZ ring')
+        assert ring.colour == '#00ff00'
+        assert ring.title == 'SA-10 WEZ ring'
+
+    def test_friendly_ring_is_still_written_to_the_visible_coalition(self):
+        """
+        The override is the colour, never the side. A ring written to the other
+        coalition would be invisible to the pilots who need it.
+        """
+        ring = d.match_threat_system('Patriot', self.MIXED)
+        payload = d.build_ring_payload(ring, [30.0, 32.0], 'Mission', side='blue')
+        assert payload['fields']['side'] == 'blue'
+        assert payload['fields']['color'] == '#0068ff'
+
+
 class TestRingPayload:
     def test_shape(self):
-        payload = d.build_ring_payload('SA-10', 119265, [30.5, 32.5], 'Curse')
+        ring = d.ThreatRing('SA-10', 119265, d.DEFAULT_RING_COLOUR, d.DEFAULT_RING_LABEL)
+        payload = d.build_ring_payload(ring, [30.5, 32.5], 'Curse')
         assert payload['title'] == 'SA-10 Range'
         assert payload['fields']['type'] == 'circle'
         assert payload['fields']['center'] == [30.5, 32.5]
@@ -465,14 +515,16 @@ class TestRingPayload:
         assert set(payload['fields']) == set(d.FIELD_DEFAULTS)
 
     def test_custom_label_and_colour(self):
-        payload = d.build_ring_payload('SA-11', 51275, [1.0, 2.0], 'M',
-                                       colour='#00ff00', label='{name} threat')
+        ring = d.ThreatRing('SA-11', 51275, '#00ff00', '{name} threat')
+        payload = d.build_ring_payload(ring, [1.0, 2.0], 'M')
         assert payload['title'] == 'SA-11 threat'
         assert payload['fields']['color'] == '#00ff00'
 
-    def test_generated_ring_would_not_match_itself(self):
-        """A ring's own title must never produce a second ring."""
-        payload = d.build_ring_payload('SA-10', 119265, [1.0, 2.0], 'M')
+    @pytest.mark.parametrize('label', ['{name} Range', '{name} Coverage'])
+    def test_generated_ring_would_not_match_itself(self, label):
+        """Neither wording may produce a ring around a ring."""
+        ring = d.ThreatRing('SA-10', 119265, '#ff0000', label)
+        payload = d.build_ring_payload(ring, [1.0, 2.0], 'M')
         assert d.match_threat_system(payload['title'], SYSTEMS) is None
 
 

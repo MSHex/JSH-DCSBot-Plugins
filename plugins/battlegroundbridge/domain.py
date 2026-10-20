@@ -354,8 +354,11 @@ DEFAULT_THREAT_SYSTEMS: dict[str, int] = {
 }
 DEFAULT_RING_COLOUR = '#ff0000'
 DEFAULT_RING_LABEL = '{name} Range'
-#: A point already describing a ring must not acquire a ring of its own.
-DEFAULT_RING_SKIP = r'\b(range|ring|mez|wez)\b'
+#: A point already describing a ring must not acquire a ring of its own. This
+#: has to cover the wording rings are actually labelled with -- 'coverage' is
+#: here because friendly rings are labelled '<name> Coverage', and without it a
+#: mission label reading 'Patriot Coverage' would be given a ring.
+DEFAULT_RING_SKIP = r'\b(range|ring|coverage|envelope|umbrella|mez|wez)\b'
 
 
 def _system_pattern(system: str) -> re.Pattern:
@@ -370,40 +373,76 @@ def _system_pattern(system: str) -> re.Pattern:
     return re.compile(rf'(?<![A-Za-z0-9]){body}(?![0-9])', re.IGNORECASE)
 
 
-def match_threat_system(title: str, systems: dict[str, Any],
-                        skip_pattern: str = DEFAULT_RING_SKIP) -> Optional[tuple[str, float]]:
-    """
-    The threat system a title names, and its ring radius in metres.
+@dataclass(frozen=True)
+class ThreatRing:
+    """A matched system and everything needed to draw its ring."""
+    system: str
+    radius: float
+    colour: str
+    label: str
 
-    Longest designation first, so `SA-10` wins over `SA-1` when a config
-    contains both. Returns None when nothing matches, or when the title already
+    @property
+    def title(self) -> str:
+        return self.label.format(name=self.system)
+
+
+def match_threat_system(title: str, systems: dict[str, Any],
+                        skip_pattern: str = DEFAULT_RING_SKIP,
+                        colour: str = DEFAULT_RING_COLOUR,
+                        label: str = DEFAULT_RING_LABEL) -> Optional[ThreatRing]:
+    """
+    The threat system a title names, with its radius, colour and label.
+
+    A system's value is either a plain radius in metres, or a mapping that
+    overrides the colour and label as well -- which is how friendly coverage is
+    told apart from enemy threat on the map:
+
+        SA-10: 119265
+        Patriot:
+          radius: 160000
+          colour: "#0068ff"
+          label: "{name} Coverage"
+
+    Longest designation first, so `SA-10` wins over `SA-1` when a config holds
+    both. Returns None when nothing matches, or when the title already
     describes a ring.
+
+    Note that the override is the COLOUR, never the side. Every ring is written
+    to the same coalition as the rest of this server's geometry; a ring written
+    to the other side would simply be invisible to the pilots who need it.
     """
     if not title:
         return None
     if skip_pattern and re.search(skip_pattern, title, re.IGNORECASE):
         return None
+
     for system in sorted(systems, key=len, reverse=True):
-        radius = _number(systems[system])
+        setting = systems[system]
+        if isinstance(setting, dict):
+            radius = _number(setting.get('radius'))
+            system_colour = setting.get('colour') or setting.get('color') or colour
+            system_label = setting.get('label') or label
+        else:
+            radius = _number(setting)
+            system_colour, system_label = colour, label
         if radius > 0 and _system_pattern(system).search(title):
-            return system, radius
+            return ThreatRing(system, radius, str(system_colour), str(system_label))
     return None
 
 
-def build_ring_payload(system: str, radius: float, centre: list[float], author_name: str,
-                       side: str = 'blue', colour: str = DEFAULT_RING_COLOUR,
-                       label: str = DEFAULT_RING_LABEL) -> dict:
-    """A circle of `radius` metres around `centre`, in Battleground's own shape."""
+def build_ring_payload(ring: ThreatRing, centre: list[float], author_name: str,
+                       side: str = 'blue') -> dict:
+    """A circle of `ring.radius` metres around `centre`, in Battleground's shape."""
     fields = dict(FIELD_DEFAULTS)
     fields.update({
         'type': 'circle',
         'side': side if side in SIDES else 'blue',
         'center': [centre[0], centre[1]],
-        'radius': radius,
-        'color': colour,
+        'radius': ring.radius,
+        'color': ring.colour,
         'clickable': True,
     })
-    return {'title': label.format(name=system),
+    return {'title': ring.title,
             'author': {'name': author_name, 'icon_url': ''},
             'fields': fields}
 

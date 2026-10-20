@@ -232,8 +232,11 @@ class BridgeStore:
         rings = rings or {}
         if not rings.get('enabled', False):
             return
-        match = match_threat_system(title, rings.get('systems') or {},
-                                    rings.get('skip_pattern', DEFAULT_RING_SKIP))
+        match = match_threat_system(
+            title, rings.get('systems') or {},
+            rings.get('skip_pattern', DEFAULT_RING_SKIP),
+            rings.get('colour', DEFAULT_RING_COLOUR),
+            rings.get('label', DEFAULT_RING_LABEL))
 
         cursor = await conn.execute(S.FIND_RING_BY_PARENT, (item_id,))
         existing = await cursor.fetchone()
@@ -245,11 +248,7 @@ class BridgeStore:
                 await conn.execute(S.TOMBSTONE_ITEM, (ring_item_id,))
             return
 
-        system, radius = match
-        payload = build_ring_payload(
-            system, radius, [lat, lon], author_name, side=side,
-            colour=rings.get('colour', DEFAULT_RING_COLOUR),
-            label=rings.get('label', DEFAULT_RING_LABEL))
+        payload = build_ring_payload(match, [lat, lon], author_name, side=side)
 
         if existing:
             ring_item_id, geometry_id, _ = existing
@@ -364,14 +363,13 @@ class BridgeStore:
                     continue
                 match = match_threat_system(
                     result.payload['title'], ring_config.get('systems') or {},
-                    ring_config.get('skip_pattern', DEFAULT_RING_SKIP))
+                    ring_config.get('skip_pattern', DEFAULT_RING_SKIP),
+                    ring_config.get('colour', DEFAULT_RING_COLOUR),
+                    ring_config.get('label', DEFAULT_RING_LABEL))
                 centre = result.payload['fields'].get('posPoint')
                 if match and centre and len(centre) == 2:
-                    system, radius = match
-                    ring_payloads.append(build_ring_payload(
-                        system, radius, centre, author_name, side=side,
-                        colour=ring_config.get('colour', DEFAULT_RING_COLOUR),
-                        label=ring_config.get('label', DEFAULT_RING_LABEL)))
+                    ring_payloads.append(
+                        build_ring_payload(match, centre, author_name, side=side))
 
         async with self.lock(server_name):
             async with self.pool.connection() as conn:

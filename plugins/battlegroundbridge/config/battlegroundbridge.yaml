@@ -35,11 +35,35 @@ DEFAULT:
     label: "{name} Range"
     # Titles matching this never get a ring, so a point already describing a
     # ring does not acquire one of its own.
-    skip_pattern: '\b(range|ring|mez|wez)\b'
+    skip_pattern: '\b(range|ring|coverage|envelope|umbrella|mez|wez)\b'
     systems:
+      # A plain number is a radius in metres, using the colour and label above.
       SA-5: 297100
       SA-10: 119265
       SA-11: 51275
+      #
+      # A mapping overrides the colour and wording, which is how FRIENDLY
+      # coverage is told apart from enemy threat. Note that only the colour
+      # changes -- every ring is written to the same coalition as the rest of
+      # this server's geometry, because a ring on the other side would be
+      # invisible to the pilots who need it.
+      #
+      # Unlike the SA-5/10/11 radii above, which are the ones JSH was already
+      # drawing by hand, these are starting points rather than measured values.
+      # Set them to whatever your briefings assume before switching them on.
+      #
+      # Patriot:
+      #   radius: 160000
+      #   colour: "#0068ff"
+      #   label: "{name} Coverage"
+      # Hawk:
+      #   radius: 40000
+      #   colour: "#0068ff"
+      #   label: "{name} Coverage"
+      # NASAMS:
+      #   radius: 25000
+      #   colour: "#0068ff"
+      #   label: "{name} Coverage"
 
   admin_roles: [DCS Admin, GameMaster]
   # UCIDs that may manage other players' reports even without a linked Discord

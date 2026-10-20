@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 
 from collections import Counter
@@ -6,6 +7,11 @@ from typing import Any, Optional, cast
 
 from core import EventListener, Server, Status, event, chat_command
 from plugins.creditsystem.player import CreditPlayer
+
+#: One UDP datagram. DCS reads with LuaSocket's 8192-byte default and
+#: truncates anything larger without a word in either log.
+DATAGRAM_LIMIT = 8192
+DATAGRAM_MARGIN = 400
 
 
 class CreditsEventListener(EventListener["Credits"]):
@@ -329,7 +335,25 @@ class CreditsEventListener(EventListener["Credits"]):
     # ------------------------------------------------------------------
 
     async def _inject_lua(self, server: Server) -> None:
-        """Push the landing hook into the running mission."""
+        """
+        Push the mission hooks into the running mission.
+
+        The script goes out as a single UDP datagram: send_to_dcs ends in
+        transport.sendto, and the DCS side reads it with UDPRecvSocket:receive()
+        called with no size argument -- LuaSocket's 8192-byte default. A larger
+        payload is TRUNCATED, not rejected. The JSON then fails to parse, no
+        handler runs, and absolutely nothing is logged on either side.
+
+        That is not hypothetical. Version 1.6 grew the file to an 8424-byte
+        datagram, and every injection silently did nothing: the sampler was
+        never registered, no error appeared in dcs.log, and the only symptom was
+        that refuelling paid nobody. Mission-load injection of 1.5 had always
+        worked because that file was only 5644 bytes.
+
+        So comments are stripped on the wire -- the source keeps them -- and the
+        size is checked before sending, loudly, because a silent truncation is
+        far worse than a refusal.
+        """
         if not self._config(server):
             return
         path = os.path.join(os.path.dirname(__file__), 'lua', 'mission.lua')
@@ -339,11 +363,36 @@ class CreditsEventListener(EventListener["Credits"]):
         except OSError as ex:
             self.log.error(f"JSH Credits: could not read {path}: {ex}")
             return
-        await server.send_to_dcs({
-            'command': 'do_script',
-            'script': script
-        })
-        self.log.debug(f"JSH Credits: landing hook injected into {server.name}")
+
+        script = self._minify_lua(script)
+        message = {'command': 'do_script', 'script': script}
+        # Headroom for the fields the bot adds on the way out (server_name and,
+        # for a remote server, channel) and for JSON escaping.
+        size = len(json.dumps(message).encode()) + DATAGRAM_MARGIN
+        if size > DATAGRAM_LIMIT:
+            self.log.error(
+                f"JSH Credits: mission.lua is too large to inject into {server.name} "
+                f"({size} bytes with headroom, limit {DATAGRAM_LIMIT}). DCS would "
+                f"truncate it silently and no handler would register. Not sending.")
+            return
+
+        await server.send_to_dcs(message)
+        self.log.debug(f"JSH Credits: mission hooks injected into {server.name} "
+                       f"({size} bytes)")
+
+    @staticmethod
+    def _minify_lua(script: str) -> str:
+        """
+        Drop whole-line comments and blank lines.
+
+        Only lines whose first non-space characters are `--` are removed, and
+        trailing comments are left alone: a `--` inside a string literal would
+        otherwise take the rest of the line with it. Long-form `--[[ ]]` blocks
+        are not used in this file and are deliberately not handled.
+        """
+        kept = [line for line in script.splitlines()
+                if line.strip() and not line.lstrip().startswith('--')]
+        return '\n'.join(kept)
 
     @event(name="registerDCSServer")
     async def registerDCSServer(self, server: Server, data: dict) -> None:

@@ -1,5 +1,6 @@
 import asyncio
 import discord
+import json
 import os
 
 from core import Plugin, Group, utils, Server, Status
@@ -9,6 +10,25 @@ from services.bot import DCSServerBot
 from typing import Optional
 
 from .listener import RanksEventListener
+
+#: One UDP datagram. DCS reads with LuaSocket's 8192-byte default and
+#: truncates anything larger without a word in either log -- so an oversized
+#: script registers nothing and reports no error. jsh_credits 1.6 shipped over
+#: this line and the symptom was simply that a feature stopped working.
+DATAGRAM_LIMIT = 8192
+DATAGRAM_MARGIN = 400
+
+
+def minify_lua(script: str) -> str:
+    """
+    Drop whole-line comments and blank lines before sending.
+
+    Only lines starting with `--` go; trailing comments stay, since a `--`
+    inside a string literal would otherwise swallow the rest of the line.
+    """
+    return '\n'.join(line for line in script.splitlines()
+                      if line.strip() and not line.lstrip().startswith('--'))
+
 
 RUNNING = [Status.RUNNING, Status.PAUSED]
 GM_ROLES = ['DCS Admin', 'GameMaster']
@@ -161,7 +181,17 @@ class Ranks(Plugin[RanksEventListener]):
         except OSError as ex:
             self.log.error(f"JSH Ranks: could not read {path}: {ex}")
             return
-        await server.send_to_dcs({'command': 'do_script', 'script': script})
+        script = minify_lua(script)
+        message = {'command': 'do_script', 'script': script}
+        size = len(json.dumps(message).encode()) + DATAGRAM_MARGIN
+        if size > DATAGRAM_LIMIT:
+            self.log.error(
+                f"JSH Ranks: mission.lua is too large to inject into {server.name} "
+                f"({size} bytes with headroom, limit {DATAGRAM_LIMIT}). DCS would "
+                f"truncate it silently and the rank hook would never register. Not sending.")
+            return
+        await server.send_to_dcs(message)
+        self.log.debug(f"JSH Ranks: mission hook injected into {server.name} ({size} bytes)")
 
     async def push(self, server: Server) -> int:
         """Sends the current levels to the mission. Returns how many were sent."""

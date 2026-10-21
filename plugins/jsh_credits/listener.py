@@ -425,13 +425,17 @@ class CreditsEventListener(EventListener["Credits"]):
         itself is idempotent: every handler sits behind its own `if not ... then`
         so a second injection registers only what is missing.
         """
-        if server.status in (Status.RUNNING, Status.PAUSED):
-            self._spawn(self._inject_lua(server))
-        else:
-            # Said out loud, because a silent skip here is indistinguishable
-            # from an injection that was sent and did nothing.
-            self.log.debug(f"JSH Credits: not injecting into {server.name}, "
-                           f"status is {server.status}")
+        # No status check. DCS is registering, which means DCS is there with a
+        # mission loaded -- that is what the hook registers from.
+        #
+        # Checking server.status here never worked, and the reason is in
+        # DCSServerBot itself. plugins/mission/listener.py sets it inside ITS
+        # registerDCSServer handler, under a comment reading "Set the status at
+        # the latest possible place". Listener order across plugins is not
+        # guaranteed, so when this handler runs the status is usually still
+        # whatever it was before registration, and a RUNNING/PAUSED test is
+        # simply false. Every bot restart silently skipped the injection.
+        self._spawn(self._inject_lua(server))
 
     @event(name="onMissionLoadEnd")
     async def onMissionLoadEnd(self, server: Server, _: dict) -> None:

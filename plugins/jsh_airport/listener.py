@@ -35,7 +35,12 @@ class AirportEventListener(EventListener["Airport"]):
     # mission.lua ignores a second load, so this is safe.
     @event(name="registerDCSServer")
     async def registerDCSServer(self, server: Server, data: dict) -> None:
-        if self.plugin.enabled(server) and server.status in (Status.RUNNING, Status.PAUSED):
+        # No status check: DCS is registering, so DCS is there with a mission
+        # loaded. Testing server.status here never worked -- DCSServerBot's own
+        # mission plugin sets it inside ITS registerDCSServer handler, under the
+        # comment "Set the status at the latest possible place", and listener
+        # order across plugins is not guaranteed. See jsh_credits 1.9.
+        if self.plugin.enabled(server):
             await server.send_to_dcs({"command": "jshAirportLoad"})
             self.plugin.airbases.pop(server.name, None)
             self._spawn(self.refresh_later(server))

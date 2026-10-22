@@ -76,6 +76,28 @@ FIELD_DEFAULTS: dict[str, Any] = {
 #: _rect_corners for why that approximation is acceptable there and nowhere else.
 METRES_PER_DEGREE = 111320.0
 
+#: Names DCS generates when nobody has renamed the drawing: Polygon-2-1-1-1-1,
+#: Line-25, Icon-2-2-2-1, Label-3. On a busy mission these cover the map in
+#: strings that tell a pilot nothing, so they are imported without a label.
+#:
+#: The trailing (-\d+)* is what makes this safe. It matches only the untouched
+#: default shape, so anything a human actually typed -- "Line of Death",
+#: "Polygon Alpha", "TRAINING AREA" -- keeps its name. Renaming a drawing in the
+#: Mission Editor is still how you give it a label on the map.
+DEFAULT_UNLABELLED = r'^(Polygon|Line|Label|Icon|TextBox)(-\d+)*$'
+
+
+def is_default_name(name: str, pattern: str = DEFAULT_UNLABELLED) -> bool:
+    """True when DCS named this drawing and nobody has since."""
+    if not name or not pattern:
+        return False
+    try:
+        return re.match(pattern, name.strip(), re.IGNORECASE) is not None
+    except re.error:
+        # A broken pattern in the config must not take the whole import down.
+        return False
+
+
 #: Fields the F10 marker owns. On an update, everything else in an existing row
 #: is left exactly as the website left it -- that is what preserves notes,
 #: screenshots and colour changes made in the browser.
@@ -249,6 +271,9 @@ class Converted:
     kind: str
     payload: dict
     approximated: Optional[str] = None
+    #: The drawing's own name, kept even when the map label is blanked, so the
+    #: import summary and bgb_items still say which shape this was.
+    name: str = ''
 
 
 @dataclass(frozen=True)
@@ -258,7 +283,8 @@ class Unsupported:
     reason: str
 
 
-def convert_drawing(drawing: dict, author_name: str, side: str = 'blue') -> Union[
+def convert_drawing(drawing: dict, author_name: str, side: str = 'blue',
+                    unlabelled_pattern: str = DEFAULT_UNLABELLED) -> Union[
         Converted, Unsupported]:
     """
     Turn one entry from the mission plugin's `getMissionDrawings` into a
@@ -274,6 +300,8 @@ def convert_drawing(drawing: dict, author_name: str, side: str = 'blue') -> Unio
     briefed as if it were real.
     """
     name = str(drawing.get('name') or 'Unnamed')
+    # Blank on the map, not in our records: see DEFAULT_UNLABELLED.
+    label = '' if is_default_name(name, unlabelled_pattern) else name
     primitive = str(drawing.get('primitiveType') or 'Unknown')
     points = _latlon_list(drawing.get('points'))
     location = drawing.get('location') or {}
@@ -287,7 +315,7 @@ def convert_drawing(drawing: dict, author_name: str, side: str = 'blue') -> Unio
         fields = dict(FIELD_DEFAULTS)
         fields.update({'type': kind, 'side': side, 'clickable': True, 'color': colour})
         fields.update(extra)
-        return {'title': name, 'author': {'name': author_name, 'icon_url': ''},
+        return {'title': label, 'author': {'name': author_name, 'icon_url': ''},
                 'fields': fields}
 
     if primitive == 'Line':
@@ -301,23 +329,24 @@ def convert_drawing(drawing: dict, author_name: str, side: str = 'blue') -> Unio
         # drawn straight between them.
         if str(drawing.get('lineMode') or '').lower() not in ('', 'segments', 'segmented'):
             approximated = f"lineMode '{drawing.get('lineMode')}' drawn as straight segments"
-        return Converted(kind, payload(kind, points=points), approximated)
+        return Converted(kind, payload(kind, points=points), approximated, name)
 
     if primitive == 'Polygon':
         mode = str(drawing.get('polygonMode') or '').lower()
         radius = _number(drawing.get('radius'))
         if mode == 'circle' and centre and radius:
-            return Converted('circle', payload('circle', center=centre, radius=radius))
+            return Converted('circle', payload('circle', center=centre, radius=radius),
+                             None, name)
         if len(points) >= 3:
             approximated = (f"polygonMode '{mode}' approximated from its vertices"
                             if mode in ('rect', 'oval', 'arrow') else None)
-            return Converted('zone', payload('zone', points=points), approximated)
+            return Converted('zone', payload('zone', points=points), approximated, name)
 
         width, height = _number(drawing.get('width')), _number(drawing.get('height'))
         if mode == 'rect' and centre and width and height:
             corners = _rect_corners(centre, width, height, _number(drawing.get('angle')))
             return Converted('zone', payload('zone', points=corners),
-                             'rect corners derived from width, height and angle')
+                             'rect corners derived from width, height and angle', name)
 
         # oval and arrow are described by r1/r2/length rather than width/height,
         # and neither appears on a Common layer in any mission seen so far. They
@@ -328,14 +357,16 @@ def convert_drawing(drawing: dict, author_name: str, side: str = 'blue') -> Unio
     if primitive in ('TextBox', 'Icon'):
         if not centre:
             return Unsupported(name, primitive, 'no origin')
+        # A text box's own text is what a human wrote, so it always wins. With
+        # no text, fall back to the label -- which is blank for a drawing DCS
+        # named itself, leaving an unlabelled point rather than 'Icon-2-2-2-1'.
         text = str(drawing.get('text') or '').strip()
-        title = text or name
         fields_extra: dict[str, Any] = {'posPoint': centre, 'position_type': 'POINT'}
         converted = payload('markpoint', **fields_extra)
-        converted['title'] = title[:TITLE_MAX]
+        converted['title'] = (text or label)[:TITLE_MAX]
         note = ('text box rendered as a labelled point'
                 if primitive == 'TextBox' else 'icon rendered as a labelled point')
-        return Converted('markpoint', converted, note)
+        return Converted('markpoint', converted, note, name)
 
     return Unsupported(name, primitive, 'unsupported primitive type')
 

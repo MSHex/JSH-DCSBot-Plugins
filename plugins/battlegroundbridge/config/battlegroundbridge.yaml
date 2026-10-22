@@ -22,6 +22,16 @@ DEFAULT:
   # /bgbridge status.
   debug: false
   drawing_layers: [Common]
+  # Drawings still carrying a name DCS generated -- Polygon-2-1-1-1-1, Line-25,
+  # Icon-2-2-2-1, Label-3 -- are imported WITHOUT a label, because on a busy
+  # mission those strings cover the map and tell a pilot nothing.
+  #
+  # The trailing (-\d+)* is what makes this safe: it matches only the untouched
+  # default shape, so anything a human typed keeps its name. Renaming a drawing
+  # in the Mission Editor is still how you give it a label on the map.
+  #
+  # Set to '' to label everything.
+  unlabelled_pattern: '^(Polygon|Line|Label|Icon|TextBox)(-\d+)*$'
   retain_intel_on_mission_change: true
   # 0 disables expiry. When positive, measured from the last DCS-driven change,
   # so edits made on the website never extend a report's life.

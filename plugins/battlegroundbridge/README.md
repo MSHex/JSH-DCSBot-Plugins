@@ -85,6 +85,23 @@ the first successful initialisation after a bot restart, and on
 | Ellipse / arrow | *skipped* | Described by `r1`/`r2`/`length` rather than width and height. Not guessed at. |
 | Anything else | *skipped* | |
 
+### Labels
+
+A drawing still carrying the name DCS gave it — `Polygon-2-1-1-1-1`, `Line-25`,
+`Icon-2-2-2-1`, `Label-3` — is imported **without a label**. On a busy mission
+those cover the map in strings that tell a pilot nothing.
+
+Anything a human typed keeps its name, because `unlabelled_pattern` matches only
+the untouched default shape: `Line of Death`, `Polygon Alpha` and `TRAINING
+AREA` all survive. **Renaming a drawing in the Mission Editor is still how you
+give it a label on the map.** A text box's own text always wins over its name.
+
+The real name is kept in the bridge's own records either way, so the import
+summary and `/bgbridge status` still say which shape was which. Set
+`unlabelled_pattern: ''` to label everything.
+
+On the JSH campaign mission this leaves 2 labels out of 61 flat shapes.
+
 ### Colours
 
 A drawing keeps the colour it has in the Mission Editor. DCS stores it as
@@ -211,6 +228,7 @@ All replies are ephemeral.
 | `import_drawings` | Whether to import mission drawings at all. |
 | `debug` | Log a line per imported drawing. Off by default; the one-line summary is logged regardless. |
 | `drawing_layers` | Which layers to import. `[Common]` by default. |
+| `unlabelled_pattern` | Drawings whose name matches are imported without a map label. Default covers DCS's auto-generated names. |
 | `retain_intel_on_mission_change` | `true` keeps reports across missions. `false` clears bridge-created intel when a genuinely new mission starts. |
 | `intel_expiry_hours` | `0` disables expiry. Measured from the last DCS-driven change, so website edits do not extend it. |
 | `threat_rings` | Automatic range circles for titles naming a SAM system. Off by default. |

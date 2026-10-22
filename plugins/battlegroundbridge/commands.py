@@ -326,7 +326,8 @@ class BattlegroundBridge(Plugin[BridgeEventListener]):
         summary = await self.store.replace_drawings(
             server.name, token, _clean(result.get('drawings') or {}), layers,
             author_name='Mission', side='blue',
-            rings=config.get('threat_rings'))
+            rings=config.get('threat_rings'),
+            unlabelled_pattern=config.get('unlabelled_pattern'))
         self.last_import[server.name] = summary
         self.log.info(f"BgBridge: {server.name}: drawings -- {summary.describe()}")
         for note in summary.skipped:

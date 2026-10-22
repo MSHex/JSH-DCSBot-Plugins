@@ -545,6 +545,75 @@ class TestRingPayload:
         assert d.match_threat_system(payload['title'], SYSTEMS) is None
 
 
+class TestDefaultNames:
+    """
+    DCS's own names -- Polygon-2-1-1-1-1, Line-25, Icon-2-2-2-1 -- cover a busy
+    map in strings that tell a pilot nothing, so they are imported unlabelled.
+    Anything a human typed keeps its name.
+    """
+
+    @pytest.mark.parametrize('name', [
+        'Polygon-2', 'Polygon-2-1-1-1-1-2-1-1-1-7-1-1-1-3-1-3-5', 'Line-25',
+        'Icon-2-2-2-1', 'Label-3', 'TextBox-1', 'polygon-2-1', 'Line',
+    ])
+    def test_default_names_are_recognised(self, name):
+        assert d.is_default_name(name)
+
+    @pytest.mark.parametrize('name', [
+        'TRAINING AREA', 'Egypt offshore Oil & Gas rigs', 'SA-10 Site',
+        'Line of Death', 'Polygon Alpha', 'Icon of the Revolution',
+        'Kill Box 3', 'Polygon-2-1-A', '1st Armored Battalion', '',
+    ])
+    def test_human_names_are_kept(self, name):
+        assert not d.is_default_name(name)
+
+    def test_a_broken_pattern_does_not_break_the_import(self):
+        assert d.is_default_name('Line-25', '(((') is False
+
+    def test_an_empty_pattern_disables_the_feature(self):
+        assert d.is_default_name('Line-25', '') is False
+
+    def test_the_helpers_named_line_keeps_its_label(self):
+        """FEBA is a human name, so it survives."""
+        result = d.convert_drawing(line([(1, 2), (3, 4)]), 'Mission')
+        assert result.payload['title'] == 'FEBA'
+        assert result.name == 'FEBA'
+
+    def test_default_named_shape_keeps_its_name_for_our_records(self):
+        drawing = line([(1, 2), (3, 4)])
+        drawing['name'] = 'Line-25'
+        result = d.convert_drawing(drawing, 'Mission')
+        assert result.payload['title'] == ''
+        assert result.name == 'Line-25'
+
+    def test_text_box_text_always_wins(self):
+        result = d.convert_drawing({'name': 'Label-3', 'primitiveType': 'TextBox',
+                                    'text': 'TRAINING AREA',
+                                    'location': {'lat': 30.0, 'lng': 32.0}}, 'Mission')
+        assert result.payload['title'] == 'TRAINING AREA'
+
+    def test_default_named_icon_becomes_an_unlabelled_point(self):
+        result = d.convert_drawing({'name': 'Icon-2-2-2-1', 'primitiveType': 'Icon',
+                                    'location': {'lat': 30.0, 'lng': 32.0}}, 'Mission')
+        assert result.kind == 'markpoint'
+        assert result.payload['title'] == ''
+
+    def test_rect_too(self):
+        result = d.convert_drawing({'name': 'Polygon-2-1-1', 'primitiveType': 'Polygon',
+                                    'polygonMode': 'rect', 'width': 1000, 'height': 500,
+                                    'angle': 0, 'location': {'lat': 30.0, 'lng': 32.0}},
+                                   'Mission')
+        assert result.payload['title'] == ''
+        assert result.name == 'Polygon-2-1-1'
+
+    def test_threat_rings_still_work_on_named_shapes(self):
+        """Blanking must not stop a named SAM site getting its ring."""
+        result = d.convert_drawing({'name': 'SA-10 Site', 'primitiveType': 'Icon',
+                                    'location': {'lat': 30.0, 'lng': 32.0}}, 'Mission')
+        assert result.payload['title'] == 'SA-10 Site'
+        assert d.match_threat_system(result.payload['title'], SYSTEMS).system == 'SA-10'
+
+
 class TestImportSummary:
     def test_describe(self):
         summary = d.ImportSummary(imported=12, removed=5, approximated=['a'], skipped=['b', 'c'])

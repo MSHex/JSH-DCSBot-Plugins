@@ -20,6 +20,7 @@ from typing import Any, Optional
 
 from . import sql as S
 from .domain import (BRIDGE_ID_START, DEFAULT_RING_COLOUR, DEFAULT_RING_LABEL,
+                     DEFAULT_UNLABELLED,
                      DEFAULT_RING_SKIP, ImportSummary, build_recon_payload,
                      build_ring_payload, convert_drawing, match_threat_system,
                      merge_marker_update, Converted, Unsupported)
@@ -325,7 +326,8 @@ class BridgeStore:
     async def replace_drawings(self, server_name: str, token: str, layers: dict,
                                wanted_layers: list[str], author_name: str,
                                side: str = 'blue',
-                               rings: Optional[dict] = None) -> ImportSummary:
+                               rings: Optional[dict] = None,
+                               unlabelled_pattern: Optional[str] = None) -> ImportSummary:
         """
         Reimport the configured layers, replacing only what the bridge imported
         before. Website-created geometry and marker intel are untouched: the
@@ -343,7 +345,10 @@ class BridgeStore:
                 continue
             summary.layers.append(layer_name)
             for drawing in drawings or []:
-                result = convert_drawing(drawing, author_name, side)
+                result = convert_drawing(
+                    drawing, author_name, side,
+                    unlabelled_pattern if unlabelled_pattern is not None
+                    else DEFAULT_UNLABELLED)
                 if isinstance(result, Unsupported):
                     summary.skipped.append(
                         f"{result.name} ({result.primitive}): {result.reason}")
@@ -351,7 +356,7 @@ class BridgeStore:
                 converted.append(result)
                 if result.approximated:
                     summary.approximated.append(
-                        f"{result.payload['title']}: {result.approximated}")
+                        f"{result.name or result.payload['title']}: {result.approximated}")
 
                 # Rings attach to point features only. A zone, a line or an
                 # existing circle never gets one -- otherwise a hand-drawn
@@ -389,7 +394,7 @@ class BridgeStore:
                         await conn.execute(
                             S.INSERT_ITEM,
                             (server_name, token, 'drawing', None, geometry_id, None,
-                             author_name, result.payload['title'], None))
+                             author_name, result.name or result.payload['title'], None))
                         summary.imported += 1
 
                     # Rings for the point features, stored as ordinary drawings:

@@ -74,6 +74,12 @@ DEFAULT:
   #          numeric role ID. Defaults to the rank name itself.
   #   level  the Foothold rank number. A granted-only rank is not on the
   #          ladder, so rank_map cannot cover it -- set the level here.
+  #   badge  the artwork /pilot status shows as its thumbnail. Same shape as
+  #          creditsystem.yaml's own `badge`, so a rank you commented out of
+  #          `achievements` keeps its image by pasting the block across
+  #          unchanged. `name` defaults to the rank, so only `img` is needed.
+  #          Without one, /pilot status falls back to the EARNED rank's badge
+  #          rather than showing no thumbnail at all.
   #
   # The bot needs the "Manage Roles" permission, and its own role must sit
   # ABOVE these roles in Server Settings -> Roles, or Discord refuses the
@@ -83,16 +89,26 @@ DEFAULT:
   # place these above the ladder roles if you want the moderator rank to be the
   # one that shows.
   #
+  # The two below are the ranks commented out of creditsystem.yaml, moved
+  # here with their badge blocks carried across unchanged. Foothold's ladder
+  # ends at 20 (General of the Air Force), so O-9 and O-10 map to 18 and 19.
+  #
   # granted_ranks:
-  #   Server Moderator:
-  #     role: Server Moderator
-  #     level: 16
-  #   Server Administrator:
-  #     role: Server Administrator
-  #     level: 16
+  #   Lieutenant General (O-9):
+  #     role: Lieutenant General (O-9)
+  #     level: 18
+  #     badge:
+  #       name: Lieutenant General (O-9)
+  #       img: https://upload.wikimedia.org/wikipedia/commons/thumb/6/6b/US_Air-force_O9_class_b.svg/960px-US_Air-force_O9_class_b.svg.png
+  #   General (O-10):
+  #     role: General (O-10)
+  #     level: 19
+  #     badge:
+  #       name: General (O-10)
+  #       img: https://upload.wikimedia.org/wikipedia/commons/thumb/e/e1/US_Air-force_O10_class_b.svg/960px-US_Air-force_O10_class_b.svg.png
   #   # Shorthand: a bare number is the level, with the role named after the
-  #   # rank, so this is the same as `role: Founder, level: 16`.
-  #   Founder: 16
+  #   # rank and no badge, so this is the same as `role: Founder, level: 20`.
+  #   Founder: 20
 
   # A LADDER rank handed out by `/ranks grant` is not exempt from rank_map: it
   # is looked up here like any other, so a rung set beyond reach on purpose

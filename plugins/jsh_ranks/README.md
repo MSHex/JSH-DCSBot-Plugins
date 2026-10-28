@@ -156,11 +156,18 @@ commented out of `creditsystem.yaml`'s `achievements`**:
 
 ```yaml
 granted_ranks:
-  Server Moderator:
-    role: Server Moderator      # the Discord role; a name or a numeric ID
-    level: 16                   # the Foothold rank number
-  Founder: 16                   # shorthand: role named after the rank
+  General (O-10):
+    role: General (O-10)        # the Discord role; a name or a numeric ID
+    level: 19                   # the Foothold rank number
+    badge:                      # what /pilot status shows as its thumbnail
+      name: General (O-10)
+      img: https://upload.wikimedia.org/.../US_Air-force_O10_class_b.svg.png
+  Founder: 20                   # shorthand: role named after the rank, no badge
 ```
+
+`badge` is the same shape `creditsystem.yaml` uses, so a rank you commented out
+of `achievements` keeps its artwork by pasting the block across unchanged.
+`name` defaults to the rank, so in practice only `img` is needed.
 
 Being absent from `achievements` is precisely what makes these safe for this
 plugin to own. CreditSystem's `process_achievements` walks
@@ -238,3 +245,27 @@ Granted-**only** ranks are different: they are absent from `achievements`, so
 CreditSystem never touches them and this plugin assigns their roles itself.
 That is the whole reason to define a moderator rank under `granted_ranks`
 rather than as a ladder rung nobody can reach.
+
+## `/pilot status`
+
+`rankstatus` 1.5 and later shows a granted rank as the pilot's current rank,
+with its `badge.img` as the embed thumbnail:
+
+```
+🎖️ Current Rank
+General (O-10)
+granted · earned: Captain (O-3)
+```
+
+**Promotion Progress is unchanged and still counts the earned ladder.** The
+grant overrides what is *displayed*, never what is computed, so credits and
+flight time keep tracking toward the next real rung underneath the granted
+title. A granted rank with no `badge.img` falls back to the earned rank's
+artwork rather than leaving the embed without a thumbnail.
+
+The lookup lives in `jsh_ranks/grants.py`, which imports nothing from
+DCSServerBot, discord or any other plugin. `rankstatus` imports it lazily, at
+call time: at module level it would make `rankstatus` fail to load wherever
+`jsh_ranks` is absent, and it would tie the two packages into an import cycle,
+since `jsh_ranks` already imports `plugins.rankstatus.ranks`. Without
+`jsh_ranks` installed, `rankstatus` simply reports no grant and carries on.

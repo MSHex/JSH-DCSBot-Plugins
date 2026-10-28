@@ -9,6 +9,7 @@ from psycopg.rows import dict_row
 from services.bot import DCSServerBot
 from typing import Optional
 
+from . import grants
 from .listener import RanksEventListener
 
 #: One UDP datagram. DCS reads with LuaSocket's 8192-byte default and
@@ -129,19 +130,11 @@ class Ranks(Plugin[RanksEventListener]):
         """
         The definition of a granted-only rank, or None if it is not one.
 
-        Matched case-insensitively, because the name travels through a Discord
-        command and back and a config key is easy to mistype. A bare number is
-        shorthand for the level, with the Discord role named after the rank.
+        The resolution itself lives in grants.py, which rankstatus also reads
+        so that `/pilot status` shows the granted rank and its badge. Keeping
+        one implementation is what stops the two drifting.
         """
-        if not name:
-            return None
-        for key, spec in self.granted_ranks(server).items():
-            if str(key).casefold() != name.casefold():
-                continue
-            if isinstance(spec, dict):
-                return {'role': spec.get('role', key), 'level': spec.get('level')}
-            return {'role': key, 'level': spec}
-        return None
+        return grants.resolve_spec(self.granted_ranks(server), name)
 
     def all_rank_names(self) -> list[str]:
         """

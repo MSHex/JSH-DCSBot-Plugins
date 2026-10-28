@@ -135,8 +135,98 @@ earning access, raise some `ShopRankRequirements` values into the 11–20 range.
 
 | Command | Description |
 | --- | --- |
-| `/ranks show server` | The rank level each player on that server currently has |
+| `/ranks show server` | The rank, level and origin for each player on that server |
 | `/ranks refresh server` | Re-inject the hook and re-send every rank now |
+| `/ranks grant user rank [reason]` | Assign a rank by hand |
+| `/ranks revoke user` | Remove a manually assigned rank |
+| `/ranks grants` | List every manually assigned rank |
+| `/ranks sync` | Re-apply the Discord role for every granted rank |
+
+## Granting a rank by hand
+
+The ladder in `creditsystem.yaml` is earned — credits and playtime decide it —
+so there was no way to give someone a rank that should not depend on either.
+Moderator and admin ranks are the case that matters: they are a position, not
+an achievement.
+
+### Granted-only ranks
+
+Define them under `granted_ranks` in `jsh_ranks.yaml`, and **leave them
+commented out of `creditsystem.yaml`'s `achievements`**:
+
+```yaml
+granted_ranks:
+  General (O-10):
+    role: General (O-10)        # the Discord role; a name or a numeric ID
+    level: 19                   # the Foothold rank number
+    badge:                      # what /pilot status shows as its thumbnail
+      name: General (O-10)
+      img: https://upload.wikimedia.org/.../US_Air-force_O10_class_b.svg.png
+  Founder: 20                   # shorthand: role named after the rank, no badge
+```
+
+`badge` is the same shape `creditsystem.yaml` uses, so a rank you commented out
+of `achievements` keeps its artwork by pasting the block across unchanged.
+`name` defaults to the rank, so in practice only `img` is needed.
+
+Being absent from `achievements` is precisely what makes these safe for this
+plugin to own. CreditSystem's `process_achievements` walks
+`config['achievements']` and only ever calls `manage_role` with a role named by
+one of those entries — so a role that is not on that list is never added or
+removed by it. There is nothing to fight over. Put one back under
+`achievements` and CreditSystem will start stripping it from anyone who has not
+earned it.
+
+`/ranks grant` assigns the Discord role as well as the in-mission rank, and
+`/ranks revoke` removes it. The bot needs **Manage Roles**, and its own role
+must sit **above** these roles in Server Settings → Roles; the command tells
+you when that is what went wrong rather than failing silently.
+
+Discord colours a member by their highest-positioned role, so put these above
+the ladder roles if the moderator rank should be the one that shows.
+
+### Ladder ranks
+
+A rung of the earned ladder can also be granted, which pins the in-mission rank
+regardless of credits or hours. Its **Discord role is deliberately left alone**
+— that role belongs to CreditSystem, which recomputes it from credits and
+playtime and would strip anything added here on its next pass, producing a role
+that flickers. For a moderator rank, use `granted_ranks` instead.
+
+`user` accepts either a Discord member or a DCS player, and the autocomplete
+offers both. **Whichever you pick, both identifiers are stored when both are
+known**, because they fail in opposite directions:
+
+- the **UCID** survives a Discord account being unlinked, relinked or left
+  behind;
+- the **Discord ID** follows the person onto a second DCS install, and can be
+  written before they have ever connected — which a UCID cannot.
+
+One row per pilot: granting again replaces the earlier grant rather than
+stacking. If a pilot somehow holds both forms, the UCID one wins, being the
+more specific of the two.
+
+`rank` must be a granted-only rank or a name from the ladder, and the command
+refuses anything else — an unrecognised name would fall through `rank_map` and
+quietly leave the pilot on `default_level` instead of granting anything. For a
+ladder rank it also warns when `rank_map` has no line for it on a server where
+the plugin is enabled, which is the same failure one step later. A granted-only
+rank carries its own `level` and needs no `rank_map` entry.
+
+`/ranks sync` re-applies every granted rank's Discord role. Worth running when
+roles drift in ways a grant cannot see: someone leaves and rejoins and loses
+every role, a role is deleted and recreated, a grant was written by Discord ID
+before that person had linked, or the bot lacked permission at the time and the
+rank was recorded without the role.
+
+A grant **wins outright** over the earned rank, so it pins a rank down as well
+as up — and it freezes that pilot's progression until it is revoked.
+`/ranks show` marks a granted rank for that reason. The grant takes effect on
+the pilot's next slot change, or immediately with `/ranks refresh`.
+
+Grants live in `jsh_rank_grants` and are not tied to a campaign or a server, so
+they survive a campaign reset — unlike the credits and playtime the earned
+ladder is read from.
 
 ## What this does not change
 
@@ -144,3 +234,64 @@ Foothold's own rank credits keep accruing underneath, and
 `RankLoseWhenKilled` still subtracts them on death. They are simply no longer
 what the gates consult. If you want deaths to cost campaign credits instead,
 that belongs in `jsh_credits`, not here.
+
+**A granted LADDER rank does not assign the Discord role.** CreditSystem owns
+the roles named in `achievements` and recomputes them from credits and
+playtime, so a role granted here would be stripped on its next pass. Granting
+a ladder rank governs the rank inside the mission and what `/ranks show`
+reports; its Discord role stays with CreditSystem.
+
+Granted-**only** ranks are different: they are absent from `achievements`, so
+CreditSystem never touches them and this plugin assigns their roles itself.
+That is the whole reason to define a moderator rank under `granted_ranks`
+rather than as a ladder rung nobody can reach.
+
+## `/pilot status`
+
+`rankstatus` 1.5 and later shows a granted rank as the pilot's current rank,
+with its `badge.img` as the embed thumbnail:
+
+```
+🎖️ Current Rank          💳 Available Credits     ⏱️ Campaign Flight Time
+General (O-10)           17,577                   313h 2m
+
+📈 Promotion Progress
+🏆 Admin — outside the campaign ladder.
+```
+
+**A granted rank replaces the earned one outright.** It is a position rather
+than a milestone, so there is nothing left to progress toward: no target rank,
+no credits or hours remaining, and the earned rung underneath is not shown at
+all. It reads the way the top of the ladder reads.
+
+### Wording
+
+Each granted rank carries a short `status:` label — `Admin`, `Staff`,
+`Moderator` — and one format string wraps them all:
+
+```yaml
+granted_status_format: '🏆 {status} — outside the campaign ladder.'
+default_granted_status: Granted rank
+```
+
+`{status}` is the rank's own label and `{rank}` its name; both placeholders are
+optional, and a format string with neither is used literally. Changing the
+phrasing for every rank is a one-line edit; changing it for one rank is its
+`status:`. A rank with no `status:` falls back to `default_granted_status`.
+
+A typo in the format string cannot take down `/pilot status`: an unrecognised
+placeholder falls back to the bare label.
+
+Credits and flight time are still displayed, because they are facts about the
+pilot either way — and they keep accruing, so revoking a grant returns the
+pilot to the correct earned rank with no catching up to do.
+
+A granted rank with no `badge.img` falls back to the earned rank's artwork
+rather than leaving the embed without a thumbnail.
+
+The lookup lives in `jsh_ranks/grants.py`, which imports nothing from
+DCSServerBot, discord or any other plugin. `rankstatus` imports it lazily, at
+call time: at module level it would make `rankstatus` fail to load wherever
+`jsh_ranks` is absent, and it would tie the two packages into an import cycle,
+since `jsh_ranks` already imports `plugins.rankstatus.ranks`. Without
+`jsh_ranks` installed, `rankstatus` simply reports no grant and carries on.

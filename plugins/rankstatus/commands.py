@@ -9,6 +9,7 @@ from discord import app_commands, SelectOption
 from plugins.logbook.utils.ribbon import create_ribbon_rack, HAS_IMAGING
 from psycopg.rows import dict_row
 from services.bot import DCSServerBot
+from typing import Optional
 
 from .ranks import (
     calculate_kd_ratio,
@@ -205,6 +206,64 @@ class RankStatus(Plugin):
                 return achievements
         return []
 
+    # ----------------------------------------------------- granted ranks
+    # jsh_ranks is OPTIONAL here. Everything below degrades to "no grant" if
+    # it is not installed, so rankstatus keeps working on its own.
+    @staticmethod
+    def _grants_module():
+        """
+        Imported lazily, on purpose, for two separate reasons.
+
+        At module level it would make rankstatus fail to load wherever
+        jsh_ranks is not installed -- importing plugins.jsh_ranks runs its
+        __init__, which pulls in its commands module and everything under it.
+
+        It would also risk a cycle: jsh_ranks.commands imports
+        plugins.rankstatus.ranks. That is a different module from this one and
+        harmless today, but a module-level import here would make the two
+        packages import each other, which is one refactor away from breaking.
+        """
+        try:
+            from plugins.jsh_ranks import grants
+            return grants
+        except Exception:
+            return None
+
+    async def get_granted_rank(self, ucid: str) -> tuple[Optional[dict], Optional[str]]:
+        """
+        The pilot's manually granted rank as an achievement-shaped dict, plus
+        the line to show in place of promotion progress -- or (None, None).
+
+        Returns the creditsystem.yaml shape so the embed renders it through
+        the paths it already has, rather than growing a second one.
+        """
+        grants = self._grants_module()
+        if not grants:
+            return None, None
+        try:
+            async with self.apool.connection() as conn:
+                cursor = await conn.execute(grants.GRANTS_TABLE_EXISTS)
+                if not (await cursor.fetchone())[0]:
+                    return None, None
+                cursor = await conn.execute(grants.GRANT_FOR_UCID, (ucid, ucid))
+                row = await cursor.fetchone()
+            if not row:
+                return None, None
+            name = row[0]
+            # The granted_ranks block is global, so DEFAULT is the right read.
+            config = self.get_config(plugin_name='jsh_ranks') or {}
+            spec = grants.resolve_spec(config.get('granted_ranks') or {}, name)
+            status = grants.status_line(
+                name, spec,
+                fmt=config.get('granted_status_format'),
+                default_status=config.get('default_granted_status'))
+            return grants.as_achievement(name, spec), status
+        except Exception as ex:
+            # A missing plugin, a missing table or a config gap must never
+            # take down /pilot status; the earned rank is still correct.
+            self.log.debug(f"RankStatus: could not read granted rank for {ucid}: {ex}")
+            return None, None
+
     def get_achievement_name(self, achievement: dict | None) -> str:
         if not achievement:
             return _('Unranked')
@@ -271,6 +330,14 @@ class RankStatus(Plugin):
         credits = int(campaign['credits'])
         playtime = int(campaign['playtime']) / 3600.0
         current_rank, next_rank = get_rank_progress(achievements, credits, playtime)
+        # A granted rank replaces the earned one outright: it is a position,
+        # not a milestone, so there is nothing left to progress toward and the
+        # earned rung underneath it is not shown. Credits and flight time are
+        # still displayed -- those are facts about the pilot either way, and
+        # they keep accruing for when a grant is revoked.
+        granted_rank, granted_status = await self.get_granted_rank(ucid)
+        if granted_rank:
+            next_rank = None
         is_self = member.id == interaction.user.id
         can_view_private = is_self or utils.check_roles(
             self.bot.roles.get('DCS Admin', []), interaction.user)
@@ -300,8 +367,10 @@ class RankStatus(Plugin):
             color=discord.Color.blue()
         )
         embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
+        display_rank = granted_rank or current_rank
         embed.add_field(
-            name=_('🎖️ Current Rank'), value=f"**{self.get_achievement_name(current_rank)}**", inline=True)
+            name=_('🎖️ Current Rank'),
+            value=f"**{self.get_achievement_name(display_rank)}**", inline=True)
         embed.add_field(name=_('💳 Available Credits'), value=f"**{credits:,}**", inline=True)
         embed.add_field(name=_('⏱️ Campaign Flight Time'), value=f"**{format_playtime(playtime)}**", inline=True)
 
@@ -332,7 +401,10 @@ class RankStatus(Plugin):
             embed.add_field(name=_('📈 Promotion Progress'), value='\n'.join(progress), inline=False)
         else:
             embed.add_field(
-                name=_('📈 Promotion Progress'), value=_('🏆 Maximum campaign rank achieved.'), inline=False)
+                name=_('📈 Promotion Progress'),
+                value=(granted_status if granted_rank
+                       else _('🏆 Maximum campaign rank achieved.')),
+                inline=False)
 
         kills = int(combat['kills'])
         deaths = int(combat['deaths'])
@@ -412,8 +484,16 @@ class RankStatus(Plugin):
         else:
             embed.add_field(name=_('🏅 Awards'), value=_('No awards earned yet.'), inline=False)
 
-        if current_rank and current_rank.get('badge', {}).get('img'):
-            embed.set_thumbnail(url=current_rank['badge']['img'])
+        # The granted badge wins when it has artwork; a granted rank with no
+        # `badge.img` configured falls back to the earned rank's, which is
+        # better than an embed with no thumbnail at all.
+        thumbnail = None
+        if granted_rank and granted_rank.get('badge', {}).get('img'):
+            thumbnail = granted_rank['badge']['img']
+        elif current_rank and current_rank.get('badge', {}).get('img'):
+            thumbnail = current_rank['badge']['img']
+        if thumbnail:
+            embed.set_thumbnail(url=thumbnail)
 
         file = None
         if awards and HAS_IMAGING:

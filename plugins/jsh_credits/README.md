@@ -61,11 +61,29 @@ config, `Registering EventListener CreditsEventListener`, and `=> Credits loaded
 
 ## Configuration
 
-`DEFAULT` applies to every server; a section named exactly as the server appears
-in `servers.yaml` overrides any key for that instance. `enabled: false` in a
-server section opts that server out.
+`DEFAULT` applies to every server; a section named after an **instance** (the
+names under `instances:` in `nodes.yaml`) overrides any key for that server.
+A section named after a *server* from `servers.yaml` silently does nothing at
+all, which is the single easiest mistake to make here. `enabled: false` in an
+instance section opts that server out.
 
 `multiplier` is applied once, at payout.
+
+### Messages
+
+Each in-game message is sent twice: as a popup, and into the chat window. The
+chat copy stays for the rest of the session; the popup does not.
+
+`message_timeout` is how many seconds the popup stays up. Leave it out and the
+bot's own `message_timeout` from `servers.yaml` applies, which is 10 seconds by
+default — worth raising for the `paid` message, which carries the balance either
+side of the payout and is read while taxiing.
+
+`messages_enabled: false` silences all of them on one server at once, and is
+the key to put in an instance section when the popups get in the way there.
+Credits, payouts and the ledger carry on; only the pilot stops being told.
+Blanking the individual keys under `messages:` still works, and is the way to
+silence one message rather than all of them.
 
 `points_per_kill` is evaluated top to bottom and the first match wins, so order
 entries from most specific to least. A `default` entry matches everything and must

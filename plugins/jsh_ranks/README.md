@@ -135,8 +135,46 @@ earning access, raise some `ShopRankRequirements` values into the 11–20 range.
 
 | Command | Description |
 | --- | --- |
-| `/ranks show server` | The rank level each player on that server currently has |
+| `/ranks show server` | The rank, level and origin for each player on that server |
 | `/ranks refresh server` | Re-inject the hook and re-send every rank now |
+| `/ranks grant user rank [reason]` | Assign a rank by hand |
+| `/ranks revoke user` | Remove a manually assigned rank |
+| `/ranks grants` | List every manually assigned rank |
+
+## Granting a rank by hand
+
+The ladder in `creditsystem.yaml` is earned — credits and playtime decide it.
+A rung set beyond either can therefore never be reached by flying, which is
+exactly what JSH's sixteenth rank is for. `/ranks grant` is how such a rank
+gets handed out.
+
+`user` accepts either a Discord member or a DCS player, and the autocomplete
+offers both. **Whichever you pick, both identifiers are stored when both are
+known**, because they fail in opposite directions:
+
+- the **UCID** survives a Discord account being unlinked, relinked or left
+  behind;
+- the **Discord ID** follows the person onto a second DCS install, and can be
+  written before they have ever connected — which a UCID cannot.
+
+One row per pilot: granting again replaces the earlier grant rather than
+stacking. If a pilot somehow holds both forms, the UCID one wins, being the
+more specific of the two.
+
+`rank` must be a name from the ladder, and the command refuses anything else —
+an unrecognised name would fall through `rank_map` and quietly leave the pilot
+on `default_level` instead of granting anything. It also warns when `rank_map`
+has no line for the rank on a server where the plugin is enabled, which is the
+same failure one step later.
+
+A grant **wins outright** over the earned rank, so it pins a rank down as well
+as up — and it freezes that pilot's progression until it is revoked.
+`/ranks show` marks a granted rank for that reason. The grant takes effect on
+the pilot's next slot change, or immediately with `/ranks refresh`.
+
+Grants live in `jsh_rank_grants` and are not tied to a campaign or a server, so
+they survive a campaign reset — unlike the credits and playtime the earned
+ladder is read from.
 
 ## What this does not change
 
@@ -144,3 +182,8 @@ Foothold's own rank credits keep accruing underneath, and
 `RankLoseWhenKilled` still subtracts them on death. They are simply no longer
 what the gates consult. If you want deaths to cost campaign credits instead,
 that belongs in `jsh_credits`, not here.
+
+**A granted rank does not assign the Discord role.** CreditSystem owns role
+assignment and recomputes it from credits and playtime, so a role granted here
+would be stripped on its next pass. `/ranks grant` governs the rank inside the
+mission and what `/ranks show` reports; the Discord role stays manual.

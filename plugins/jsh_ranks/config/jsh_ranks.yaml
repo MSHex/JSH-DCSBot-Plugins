@@ -56,6 +56,16 @@ DEFAULT:
     Lieutenant Colonel (O-5): 14           # Lieutenant Colonel
     Colonel (O-6): 15                      # Colonel
 
+  # A rank handed out by `/ranks grant` is NOT exempt from rank_map: it is
+  # looked up here like any other. A ladder rung that exists only to be granted
+  # -- JSH's sixteenth, which is set beyond reach on purpose -- still needs a
+  # line above, or the pilot holding it drops to default_level and the grant
+  # appears to do nothing. `/ranks grant` says so when it spots the gap, but
+  # only for servers where this plugin is enabled.
+  #
+  # Foothold's own ranks stop at 20, so that is the ceiling for a granted rank
+  # too; a higher number is simply clamped by the mission.
+
   # Optional, and unnecessary with a name-matched rank_map: Foothold's own names
   # already agree with Discord. Only worth setting if you compress several
   # Discord ranks onto one level, where these name the band rather than the

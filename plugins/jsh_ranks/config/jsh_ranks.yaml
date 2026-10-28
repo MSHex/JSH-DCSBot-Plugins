@@ -56,12 +56,52 @@ DEFAULT:
     Lieutenant Colonel (O-5): 14           # Lieutenant Colonel
     Colonel (O-6): 15                      # Colonel
 
-  # A rank handed out by `/ranks grant` is NOT exempt from rank_map: it is
-  # looked up here like any other. A ladder rung that exists only to be granted
-  # -- JSH's sixteenth, which is set beyond reach on purpose -- still needs a
-  # line above, or the pilot holding it drops to default_level and the grant
-  # appears to do nothing. `/ranks grant` says so when it spots the gap, but
-  # only for servers where this plugin is enabled.
+  # ------------------------------------------------- granted-only ranks
+  #
+  # Ranks that CANNOT be earned, and exist only to be handed out by
+  # `/ranks grant` -- moderator and admin ranks that should not fall out of
+  # credits or flight hours.
+  #
+  # These are the ranks you commented out of creditsystem.yaml's achievements.
+  # Leave them commented out: being absent from `achievements` is exactly what
+  # makes them safe for this plugin to own. CreditSystem's process_achievements
+  # walks `config['achievements']` and only ever adds or removes a role named
+  # by one of those entries, so a role that is not on that list is never
+  # touched by it. Put one back under `achievements` and CreditSystem will
+  # start stripping it from anyone who has not earned it.
+  #
+  #   role   the Discord role to assign. A name as written in Discord, or the
+  #          numeric role ID. Defaults to the rank name itself.
+  #   level  the Foothold rank number. A granted-only rank is not on the
+  #          ladder, so rank_map cannot cover it -- set the level here.
+  #
+  # The bot needs the "Manage Roles" permission, and its own role must sit
+  # ABOVE these roles in Server Settings -> Roles, or Discord refuses the
+  # change. `/ranks grant` tells you when that is what went wrong.
+  #
+  # Discord shows a member in the colour of their highest-positioned role, so
+  # place these above the ladder roles if you want the moderator rank to be the
+  # one that shows.
+  #
+  # granted_ranks:
+  #   Server Moderator:
+  #     role: Server Moderator
+  #     level: 16
+  #   Server Administrator:
+  #     role: Server Administrator
+  #     level: 16
+  #   # Shorthand: a bare number is the level, with the role named after the
+  #   # rank, so this is the same as `role: Founder, level: 16`.
+  #   Founder: 16
+
+  # A LADDER rank handed out by `/ranks grant` is not exempt from rank_map: it
+  # is looked up here like any other, so a rung set beyond reach on purpose
+  # still needs a line above or the pilot holding it drops to default_level and
+  # the grant appears to do nothing. `/ranks grant` says so when it spots the
+  # gap, but only for servers where this plugin is enabled.
+  #
+  # A granted-only rank from `granted_ranks` carries its own `level` and needs
+  # nothing here.
   #
   # Foothold's own ranks stop at 20, so that is the ceiling for a granted rank
   # too; a higher number is simply clamped by the mission.

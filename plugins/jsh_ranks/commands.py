@@ -110,15 +110,47 @@ class Ranks(Plugin[RanksEventListener]):
     def _name_of(achievement: dict) -> Optional[str]:
         return achievement.get('role') or achievement.get('badge', {}).get('name')
 
+    # --------------------------------------------------- granted-only ranks
+    def granted_ranks(self, server: Optional[Server] = None) -> dict:
+        """
+        Ranks that exist ONLY to be granted, from jsh_ranks.yaml.
+
+        These are the ranks commented out of creditsystem.yaml's achievements
+        -- moderator and admin ranks that should not fall out of credits or
+        flight hours. Being absent from `achievements` is what makes them safe
+        for this plugin to own: CreditSystem's process_achievements iterates
+        `config['achievements']` and calls manage_role only with an
+        achievement's own `role`, so a role that is not on that list is never
+        added or removed by it. Nothing to fight over.
+        """
+        return self.get_config(server).get('granted_ranks') or {}
+
+    def granted_spec(self, name: str, server: Optional[Server] = None) -> Optional[dict]:
+        """
+        The definition of a granted-only rank, or None if it is not one.
+
+        Matched case-insensitively, because the name travels through a Discord
+        command and back and a config key is easy to mistype. A bare number is
+        shorthand for the level, with the Discord role named after the rank.
+        """
+        if not name:
+            return None
+        for key, spec in self.granted_ranks(server).items():
+            if str(key).casefold() != name.casefold():
+                continue
+            if isinstance(spec, dict):
+                return {'role': spec.get('role', key), 'level': spec.get('level')}
+            return {'role': key, 'level': spec}
+        return None
+
     def all_rank_names(self) -> list[str]:
         """
-        Every rank name on the ladder, lowest rung first.
+        Every rank that can be granted: the granted-only ranks first, then the
+        earned ladder, lowest rung first.
 
-        The union of DEFAULT and every server's own section, because a rank may
-        exist on one server's ladder and not another's, and a grant that names
-        it is still valid there.
+        Granted-only ranks lead because they are what the command exists for.
         """
-        names: list[str] = []
+        names: list[str] = [str(key) for key in self.granted_ranks()]
         ladders = [self.achievements()]
         for server in self.bot.servers.values():
             try:
@@ -158,12 +190,24 @@ class Ranks(Plugin[RanksEventListener]):
         rank, so the same mechanism pins a rank down as well as up -- useful,
         but it means a grant also FREEZES a pilot's progression until it is
         revoked. /ranks show marks a granted rank for exactly that reason.
+
+        A granted-only rank carries its own level, so it needs no rank_map
+        entry -- it is not on the ladder and rank_map is keyed on ladder names.
         """
         config = self.get_config(server)
         default = int(config.get('default_level', 1))
         name = granted or self.rank_name(server, credits, playtime)
         if not name:
             return default
+        if granted:
+            spec = self.granted_spec(granted, server)
+            if spec and spec.get('level') is not None:
+                try:
+                    return int(spec['level'])
+                except (TypeError, ValueError):
+                    self.log.warning(
+                        f"JSH Ranks: granted_ranks[{granted!r}].level is not a "
+                        f"number, using rank_map instead")
         mapping = config.get('rank_map') or {}
         try:
             return int(mapping[name])
@@ -380,11 +424,63 @@ class Ranks(Plugin[RanksEventListener]):
         discord_id = row[1] if row and row[1] and row[1] > 0 else None
         return ucid, discord_id, name
 
+    async def _member_for(self, ucid: Optional[str],
+                          discord_id: Optional[int]) -> Optional[discord.Member]:
+        """The Discord member behind a grant, by either identifier."""
+        if discord_id and self.bot.guilds:
+            member = self.bot.guilds[0].get_member(int(discord_id))
+            if member:
+                return member
+        if ucid:
+            return await self.bot.get_member_by_ucid(ucid)
+        return None
+
+    async def apply_role(self, member: Optional[discord.Member], rank: str,
+                         action: str) -> Optional[str]:
+        """
+        Add or remove the Discord role for a GRANTED-ONLY rank.
+
+        Returns a message to show the admin, or None when all is well.
+
+        A rank that is on the earned ladder is deliberately left alone: its
+        role belongs to CreditSystem, which recomputes it from credits and
+        playtime and would strip anything we added on its next pass. Touching
+        it would produce a role that flickers. Only ranks absent from
+        `achievements` -- the ones defined under granted_ranks -- are ours.
+        """
+        spec = self.granted_spec(rank)
+        if not spec:
+            return None
+        role_name = spec.get('role')
+        if not role_name:
+            return None
+        if not member:
+            return (f"No Discord account is linked, so the **{role_name}** role was not "
+                    f"{'assigned' if action == 'add' else 'removed'}. The rank still "
+                    f"applies in the mission. Run `/ranks sync` once they link.")
+        role = self.bot.get_role(role_name)
+        if not role:
+            return (f"The rank is recorded, but there is no Discord role called "
+                    f"**{role_name}**. Create it, or correct `granted_ranks` in "
+                    f"jsh_ranks.yaml, then run `/ranks sync`.")
+        try:
+            if action == 'add' and role not in member.roles:
+                await member.add_roles(role, reason='JSH Ranks: granted rank')
+            elif action == 'remove' and role in member.roles:
+                await member.remove_roles(role, reason='JSH Ranks: grant revoked')
+        except discord.Forbidden:
+            return (f"The rank is recorded, but Discord would not let me change "
+                    f"**{role.name}**. The bot needs *Manage Roles*, and its own role "
+                    f"must sit **above** {role.name} in Server Settings -> Roles.")
+        except discord.HTTPException as ex:
+            return f"The rank is recorded, but Discord refused the role change: {ex}"
+        return None
+
     @ranks.command(description='Assign a rank by hand, including one that cannot be earned')
     @app_commands.guild_only()
     @app_commands.autocomplete(rank=rank_autocomplete)
     @app_commands.describe(user='A Discord member or a DCS player',
-                           rank='A rank from the creditsystem.yaml ladder',
+                           rank='A granted-only rank, or a rung of the earned ladder',
                            reason='Recorded with the grant, and shown by /ranks grants')
     @utils.app_has_roles(GM_ROLES)
     async def grant(self, interaction: discord.Interaction,
@@ -395,10 +491,13 @@ class Ranks(Plugin[RanksEventListener]):
         known = self.all_rank_names()
         if known and rank not in known:
             await interaction.followup.send(
-                f"{rank!r} is not a rank on the ladder. An unknown name would quietly "
-                f"fall back to the default level instead of granting anything.\n"
-                f"Pick one of: {', '.join(known)}", ephemeral=True)
+                f"{rank!r} is neither a granted-only rank nor a rung of the ladder. "
+                f"An unknown name would quietly fall back to the default level instead "
+                f"of granting anything.\n\nPick one of: {', '.join(known)}\n\n"
+                f"To add a moderator or admin rank, define it under `granted_ranks` in "
+                f"jsh_ranks.yaml.", ephemeral=True)
             return
+        spec = self.granted_spec(rank)
         ucid, discord_id, label = await self._subject(user)
         if not ucid and not discord_id:
             await interaction.followup.send(
@@ -426,22 +525,46 @@ class Ranks(Plugin[RanksEventListener]):
         held_by = [part for part in
                    (f"UCID `{ucid}`" if ucid else None,
                     f"Discord <@{discord_id}>" if discord_id else None) if part]
-        note = ''
-        unmapped = []
-        for target in self.bot.servers.values():
-            try:
-                if self.enabled(target) and rank not in (self.get_config(target).get('rank_map') or {}):
-                    unmapped.append(target.name)
-            except Exception:  # a server with no instance attached yet
-                continue
-        if unmapped:
-            note = (f"\n\n**Heads up:** `rank_map` has no entry for {rank!r} on "
+
+        notes = []
+        # The Discord role, for a granted-only rank. A ladder rank's role is
+        # CreditSystem's and apply_role leaves it alone; say so, because being
+        # given the rank without the role would otherwise look broken.
+        member = await self._member_for(ucid, discord_id)
+        problem = await self.apply_role(member, rank, 'add')
+        if problem:
+            notes.append(f"**{problem}**")
+        elif spec and spec.get('role'):
+            notes.append(f"Assigned the **{spec['role']}** Discord role.")
+        elif not spec:
+            notes.append(
+                f"{rank} is a rung of the earned ladder, so its Discord role stays with "
+                f"CreditSystem -- only the in-mission rank is pinned. A moderator rank "
+                f"should be defined under `granted_ranks` instead.")
+
+        # A granted-only rank carries its own level, so rank_map is irrelevant
+        # to it; only warn for a ladder rank that has no mapping.
+        if not (spec and spec.get('level') is not None):
+            unmapped = []
+            for target in self.bot.servers.values():
+                try:
+                    if self.enabled(target) and rank not in (self.get_config(target).get('rank_map') or {}):
+                        unmapped.append(target.name)
+                except Exception:  # a server with no instance attached yet
+                    continue
+            if unmapped:
+                notes.append(
+                    f"**Heads up:** `rank_map` has no entry for {rank!r} on "
                     f"{', '.join(unmapped)}, so the mission will fall back to the "
-                    f"default level there. Add it to jsh_ranks.yaml.")
+                    f"default level there. Give it a `level:` under `granted_ranks`, "
+                    f"or a `rank_map` line.")
+
+        body = '\n\n'.join(notes)
         await interaction.followup.send(
             f"Granted **{rank}** to **{label}**, held by {' and '.join(held_by)}."
-            f"{note}\n\nIt applies on their next slot change, or run `/ranks refresh` now.",
-            ephemeral=True)
+            f"{chr(10) + chr(10) + body if body else ''}"
+            f"\n\nThe in-mission rank applies on their next slot change, or run "
+            f"`/ranks refresh` now.", ephemeral=True)
 
     @ranks.command(description='Remove a manually assigned rank')
     @app_commands.guild_only()
@@ -451,22 +574,82 @@ class Ranks(Plugin[RanksEventListener]):
                          discord.Member | str, utils.UserTransformer()]):
         await interaction.response.defer(ephemeral=True)
         ucid, discord_id, label = await self._subject(user)
+        # Read the rank before deleting: the role to remove is named by it.
         async with self.apool.connection() as conn:
             cursor = await conn.execute("""
                 DELETE FROM jsh_rank_grants
                  WHERE (ucid IS NOT NULL AND ucid = %s)
                     OR (discord_id IS NOT NULL AND discord_id = %s)
+             RETURNING rank
             """, (ucid, discord_id))
-            removed = cursor.rowcount
-        if not removed:
+            ranks_removed = [row[0] for row in await cursor.fetchall()]
+        if not ranks_removed:
             await interaction.followup.send(
                 f"**{label}** has no granted rank.", ephemeral=True)
             return
-        self.log.info(f"JSH Ranks: {interaction.user} revoked the granted rank of {label}")
+
+        notes = []
+        member = await self._member_for(ucid, discord_id)
+        for rank in ranks_removed:
+            spec = self.granted_spec(rank)
+            problem = await self.apply_role(member, rank, 'remove')
+            if problem:
+                notes.append(f"**{problem}**")
+            elif spec and spec.get('role'):
+                notes.append(f"Removed the **{spec['role']}** Discord role.")
+
+        self.log.info(f"JSH Ranks: {interaction.user} revoked "
+                      f"{', '.join(ranks_removed)} from {label}")
+        body = '\n\n'.join(notes)
         await interaction.followup.send(
-            f"Removed the granted rank from **{label}**. They are back on what they "
-            f"have earned from their next slot change, or run `/ranks refresh` now.",
-            ephemeral=True)
+            f"Removed **{', '.join(ranks_removed)}** from **{label}**."
+            f"{chr(10) + chr(10) + body if body else ''}"
+            f"\n\nThey are back on what they have earned from their next slot change, "
+            f"or run `/ranks refresh` now.", ephemeral=True)
+
+    @ranks.command(name='sync', description='Re-apply the Discord role for every granted rank')
+    @app_commands.guild_only()
+    @utils.app_has_roles(GM_ROLES)
+    async def sync(self, interaction: discord.Interaction):
+        """
+        Reconciles Discord roles with the grants table.
+
+        Worth having because roles drift in ways a grant cannot see: someone
+        leaves and rejoins the server and loses every role, a role is deleted
+        and recreated, a grant was written by Discord ID before that person had
+        linked, or the bot lacked permission at the time and the write went
+        through without the role.
+        """
+        await interaction.response.defer(ephemeral=True)
+        async with self.apool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cursor:
+                await cursor.execute(
+                    'SELECT ucid, discord_id, rank FROM jsh_rank_grants ORDER BY rank')
+                rows = await cursor.fetchall()
+        if not rows:
+            await interaction.followup.send("No ranks have been granted.", ephemeral=True)
+            return
+
+        applied = ladder = 0
+        problems = []
+        for row in rows:
+            if not self.granted_spec(row['rank']):
+                ladder += 1          # CreditSystem's role; not ours to touch
+                continue
+            member = await self._member_for(row['ucid'], row['discord_id'])
+            problem = await self.apply_role(member, row['rank'], 'add')
+            if problem:
+                who = member.display_name if member else (row['ucid'] or row['discord_id'])
+                problems.append(f"- {who}: {problem}")
+            else:
+                applied += 1
+        lines = [f"Checked {len(rows)} grant(s): {applied} Discord role(s) in place."]
+        if ladder:
+            lines.append(f"{ladder} are ladder ranks, whose roles belong to CreditSystem "
+                         f"and were left alone.")
+        if problems:
+            lines.append("\n**Could not apply:**\n" + "\n".join(problems[:10]))
+        await interaction.followup.send("\n".join(lines)[:1990], ephemeral=True)
 
     @ranks.command(name='grants', description='List every manually assigned rank')
     @app_commands.guild_only()

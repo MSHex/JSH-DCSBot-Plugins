@@ -9,6 +9,14 @@ THIS instead, and nothing imports back.
 """
 from typing import Any, Optional
 
+#: What /pilot status puts in the Promotion Progress field for a granted rank.
+#: `{status}` is the rank's own `status:` label, `{rank}` its name. Both are
+#: overridable in jsh_ranks.yaml -- see status_line().
+DEFAULT_STATUS_FORMAT = '🏆 {status} — outside the campaign ladder.'
+
+#: Used for a granted rank that sets no `status:` of its own.
+DEFAULT_STATUS = 'Granted rank'
+
 #: One pilot's grant, matched on either identifier.
 #:
 #: players.discord_id is NOT NULL DEFAULT -1 in DCSServerBot, so an unlinked
@@ -67,9 +75,31 @@ def resolve_spec(granted_ranks: dict, name: str) -> Optional[dict[str, Any]]:
                 badge = {'name': badge.get('name', str(key)), 'img': badge.get('img')}
             else:
                 badge = None
-            return {'role': spec.get('role', key), 'level': spec.get('level'), 'badge': badge}
-        return {'role': key, 'level': spec, 'badge': None}
+            return {'role': spec.get('role', key), 'level': spec.get('level'),
+                    'badge': badge, 'status': spec.get('status')}
+        return {'role': key, 'level': spec, 'badge': None, 'status': None}
     return None
+
+
+def status_line(name: str, spec: Optional[dict],
+                fmt: Optional[str] = None,
+                default_status: Optional[str] = None) -> str:
+    """
+    The line /pilot status shows in place of promotion progress.
+
+    `status:` on the rank is a short label -- Admin, Staff, Moderator -- and
+    the format string wraps it, so the wording is changed in one place rather
+    than on every rank.
+
+    The format string comes from config, so a typo in it must not take down
+    /pilot status: an unknown placeholder falls back to the label alone.
+    """
+    label = (spec or {}).get('status') or default_status or DEFAULT_STATUS
+    template = fmt or DEFAULT_STATUS_FORMAT
+    try:
+        return template.format(status=label, rank=name)
+    except (KeyError, IndexError, ValueError):
+        return str(label)
 
 
 def as_achievement(name: str, spec: Optional[dict]) -> dict[str, Any]:

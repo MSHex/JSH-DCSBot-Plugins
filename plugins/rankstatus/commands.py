@@ -229,36 +229,40 @@ class RankStatus(Plugin):
         except Exception:
             return None
 
-    async def get_granted_rank(self, ucid: str) -> Optional[dict]:
+    async def get_granted_rank(self, ucid: str) -> tuple[Optional[dict], Optional[str]]:
         """
-        The pilot's manually granted rank as an achievement-shaped dict, or
-        None.
+        The pilot's manually granted rank as an achievement-shaped dict, plus
+        the line to show in place of promotion progress -- or (None, None).
 
         Returns the creditsystem.yaml shape so the embed renders it through
         the paths it already has, rather than growing a second one.
         """
         grants = self._grants_module()
         if not grants:
-            return None
+            return None, None
         try:
             async with self.apool.connection() as conn:
                 cursor = await conn.execute(grants.GRANTS_TABLE_EXISTS)
                 if not (await cursor.fetchone())[0]:
-                    return None
+                    return None, None
                 cursor = await conn.execute(grants.GRANT_FOR_UCID, (ucid, ucid))
                 row = await cursor.fetchone()
             if not row:
-                return None
+                return None, None
             name = row[0]
             # The granted_ranks block is global, so DEFAULT is the right read.
             config = self.get_config(plugin_name='jsh_ranks') or {}
             spec = grants.resolve_spec(config.get('granted_ranks') or {}, name)
-            return grants.as_achievement(name, spec)
+            status = grants.status_line(
+                name, spec,
+                fmt=config.get('granted_status_format'),
+                default_status=config.get('default_granted_status'))
+            return grants.as_achievement(name, spec), status
         except Exception as ex:
             # A missing plugin, a missing table or a config gap must never
             # take down /pilot status; the earned rank is still correct.
             self.log.debug(f"RankStatus: could not read granted rank for {ucid}: {ex}")
-            return None
+            return None, None
 
     def get_achievement_name(self, achievement: dict | None) -> str:
         if not achievement:
@@ -331,7 +335,7 @@ class RankStatus(Plugin):
         # earned rung underneath it is not shown. Credits and flight time are
         # still displayed -- those are facts about the pilot either way, and
         # they keep accruing for when a grant is revoked.
-        granted_rank = await self.get_granted_rank(ucid)
+        granted_rank, granted_status = await self.get_granted_rank(ucid)
         if granted_rank:
             next_rank = None
         is_self = member.id == interaction.user.id
@@ -398,7 +402,7 @@ class RankStatus(Plugin):
         else:
             embed.add_field(
                 name=_('📈 Promotion Progress'),
-                value=(_('🏆 Granted rank — outside the campaign ladder.') if granted_rank
+                value=(granted_status if granted_rank
                        else _('🏆 Maximum campaign rank achieved.')),
                 inline=False)
 

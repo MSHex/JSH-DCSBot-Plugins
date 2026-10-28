@@ -256,13 +256,31 @@ with its `badge.img` as the embed thumbnail:
 General (O-10)           17,577                   313h 2m
 
 📈 Promotion Progress
-🏆 Granted rank — outside the campaign ladder.
+🏆 Admin — outside the campaign ladder.
 ```
 
 **A granted rank replaces the earned one outright.** It is a position rather
 than a milestone, so there is nothing left to progress toward: no target rank,
 no credits or hours remaining, and the earned rung underneath is not shown at
 all. It reads the way the top of the ladder reads.
+
+### Wording
+
+Each granted rank carries a short `status:` label — `Admin`, `Staff`,
+`Moderator` — and one format string wraps them all:
+
+```yaml
+granted_status_format: '🏆 {status} — outside the campaign ladder.'
+default_granted_status: Granted rank
+```
+
+`{status}` is the rank's own label and `{rank}` its name; both placeholders are
+optional, and a format string with neither is used literally. Changing the
+phrasing for every rank is a one-line edit; changing it for one rank is its
+`status:`. A rank with no `status:` falls back to `default_granted_status`.
+
+A typo in the format string cannot take down `/pilot status`: an unrecognised
+placeholder falls back to the bare label.
 
 Credits and flight time are still displayed, because they are facts about the
 pilot either way — and they keep accruing, so revoking a grant returns the

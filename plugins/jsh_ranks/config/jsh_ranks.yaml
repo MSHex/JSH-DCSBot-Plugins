@@ -74,6 +74,11 @@ DEFAULT:
   #          numeric role ID. Defaults to the rank name itself.
   #   level  the Foothold rank number. A granted-only rank is not on the
   #          ladder, so rank_map cannot cover it -- set the level here.
+  #   status a short label -- Admin, Staff, Moderator -- shown by /pilot status
+  #          in place of promotion progress, since a granted rank has nothing
+  #          to progress toward. Wrapped by `granted_status_format` below, so
+  #          the wording is changed in ONE place rather than on every rank.
+  #          Defaults to `default_granted_status`.
   #   badge  the artwork /pilot status shows as its thumbnail. Same shape as
   #          creditsystem.yaml's own `badge`, so a rank you commented out of
   #          `achievements` keeps its image by pasting the block across
@@ -89,25 +94,43 @@ DEFAULT:
   # place these above the ladder roles if you want the moderator rank to be the
   # one that shows.
   #
-  # The two below are the ranks commented out of creditsystem.yaml, moved
-  # here with their badge blocks carried across unchanged. Foothold's ladder
-  # ends at 20 (General of the Air Force), so O-9 and O-10 map to 18 and 19.
+  # How a granted rank's `status` label is worded in /pilot status. Both
+  # placeholders are optional: {status} is the rank's own label, {rank} its
+  # name. This is the one line to edit to change the wording everywhere.
+  #
+  # granted_status_format: '🏆 {status} — outside the campaign ladder.'
+  #
+  # Used by a granted rank that sets no `status:` of its own.
+  #
+  # default_granted_status: Granted rank
+
+  # The ranks below are the ones commented out of creditsystem.yaml, moved
+  # here with their badge blocks carried across unchanged, plus O-11 which was
+  # never in that file at all. Foothold's ladder ends at 20 (General of the
+  # Air Force), so O-9, O-10 and O-11 map to 18, 19 and 20.
   #
   # granted_ranks:
   #   Lieutenant General (O-9):
   #     role: Lieutenant General (O-9)
   #     level: 18
+  #     status: Staff
   #     badge:
   #       name: Lieutenant General (O-9)
   #       img: https://upload.wikimedia.org/wikipedia/commons/thumb/6/6b/US_Air-force_O9_class_b.svg/960px-US_Air-force_O9_class_b.svg.png
   #   General (O-10):
   #     role: General (O-10)
   #     level: 19
+  #     status: Admin
   #     badge:
   #       name: General (O-10)
   #       img: https://upload.wikimedia.org/wikipedia/commons/thumb/e/e1/US_Air-force_O10_class_b.svg/960px-US_Air-force_O10_class_b.svg.png
+  #   General of the Air Force (O-11):
+  #     role: General of the Air Force (O-11)
+  #     level: 20
+  #     status: Admin
   #   # Shorthand: a bare number is the level, with the role named after the
-  #   # rank and no badge, so this is the same as `role: Founder, level: 20`.
+  #   # rank and no badge or status, so this is the same as
+  #   # `role: Founder, level: 20`.
   #   Founder: 20
 
   # A LADDER rank handed out by `/ranks grant` is not exempt from rank_map: it

@@ -21,7 +21,7 @@ def eq(label, got, want):
 
 GR = {
     'Lieutenant General (O-9)': {
-        'role': 'Lieutenant General (O-9)', 'level': 18,
+        'role': 'Lieutenant General (O-9)', 'level': 18, 'status': 'Staff',
         'badge': {'name': 'Lieutenant General (O-9)', 'img': 'https://x/o9.png'}},
     'General (O-10)': {
         'role': 'General (O-10)', 'level': 19,
@@ -31,12 +31,12 @@ GR = {
 }
 
 eq('full spec resolves', G.resolve_spec(GR, 'Lieutenant General (O-9)'),
-   {'role': 'Lieutenant General (O-9)', 'level': 18,
+   {'role': 'Lieutenant General (O-9)', 'level': 18, 'status': 'Staff',
     'badge': {'name': 'Lieutenant General (O-9)', 'img': 'https://x/o9.png'}})
 eq('badge name defaults to the rank', G.resolve_spec(GR, 'General (O-10)')['badge'],
    {'name': 'General (O-10)', 'img': 'https://x/o10.png'})
 eq('bare number is the level', G.resolve_spec(GR, 'Founder'),
-   {'role': 'Founder', 'level': 20, 'badge': None})
+   {'role': 'Founder', 'level': 20, 'badge': None, 'status': None})
 eq('role defaults to the rank', G.resolve_spec(GR, 'Bare')['role'], 'Bare')
 eq('case-insensitive', G.resolve_spec(GR, 'general (o-10)')['level'], 19)
 eq('unknown rank is not granted-only', G.resolve_spec(GR, 'Captain (O-3)'), None)
@@ -55,6 +55,32 @@ eq('unconfigured grant still renders its name',
 ach = G.as_achievement('General (O-10)', G.resolve_spec(GR, 'General (O-10)'))
 eq('never carries credits or playtime (must not reach get_rank_progress)',
    [k for k in ach if k in ('credits', 'playtime')], [])
+
+# --- the status line shown in place of promotion progress ---------------
+o9 = G.resolve_spec(GR, 'Lieutenant General (O-9)')
+o10 = G.resolve_spec(GR, 'General (O-10)')
+
+eq('rank status is wrapped by the default format',
+   G.status_line('Lieutenant General (O-9)', o9),
+   '🏆 Staff — outside the campaign ladder.')
+eq('a rank with no status falls back to the default label',
+   G.status_line('General (O-10)', o10),
+   '🏆 Granted rank — outside the campaign ladder.')
+eq('default label is overridable',
+   G.status_line('General (O-10)', o10, default_status='Command'),
+   '🏆 Command — outside the campaign ladder.')
+eq('format is overridable and can use {rank}',
+   G.status_line('Lieutenant General (O-9)', o9, fmt='{rank} · {status} team'),
+   'Lieutenant General (O-9) · Staff team')
+eq('a format with no placeholders is taken literally',
+   G.status_line('X', o9, fmt='Staff rank.'), 'Staff rank.')
+# A typo in config must never take down /pilot status.
+eq('an unknown placeholder degrades to the label alone',
+   G.status_line('X', o9, fmt='{nonsense} rank'), 'Staff')
+eq('an unterminated placeholder degrades too',
+   G.status_line('X', o9, fmt='{status rank'), 'Staff')
+eq('no spec at all still produces a line',
+   G.status_line('Mystery', None), '🏆 Granted rank — outside the campaign ladder.')
 
 for label, got, want, ok in checks:
     print(('  ok  ' if ok else ' FAIL '), label, '' if ok else f'-> {got!r} (wanted {want!r})')

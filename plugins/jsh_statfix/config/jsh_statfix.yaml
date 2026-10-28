@@ -1,0 +1,38 @@
+# Copy to <bot>/config/plugins/jsh_statfix.yaml on the MASTER node.
+#
+# Unlike the other plugins here, this one is not keyed on instances or servers:
+# it repairs one shared database, not a DCS server, so everything lives under
+# DEFAULT. It also only ever runs on the master node -- on a multi-node setup
+# every node loads every plugin, and two nodes repairing the same table at the
+# same time is not something to leave to chance.
+#
+# TAKE A BACKUP BEFORE THE FIRST REAL RUN. The repair rewrites `statistics`,
+# which is the only record of who flew what:
+#
+#   CREATE TABLE statistics_backup_YYYYMMDD AS SELECT * FROM statistics;
+
+DEFAULT:
+  enabled: true
+
+  # Days between runs, measured from the last SUCCESSFUL run recorded in
+  # jsh_statfix_runs -- not from how long the bot has been up. The scheduler
+  # ticks every 6 hours and checks; a bot that restarts weekly would never
+  # reach a monthly interval otherwise.
+  interval_days: 30
+
+  # true makes every SCHEDULED run report what it would do and then undo it,
+  # writing nothing. `/statfix status` still shows the counts. Worth leaving on
+  # for the first month so you can see what it would have done before letting
+  # it loose. `/statfix run dry_run:False` is unaffected by this.
+  dry_run: false
+
+  # Pass 1 only closes a session older than this. It is the safety rail that
+  # keeps a pilot who is in the air RIGHT NOW from having their session closed
+  # underneath them -- an open session is exactly what a live sortie looks
+  # like. Do not set it below the length of your longest mission.
+  min_age_hours: 6
+
+  # Pass 2 corrects a session to its pilot's last recorded event plus this
+  # much, to cover the flying after the last trackable event -- the taxi and
+  # shutdown after a landing, for instance.
+  grace_minutes: 15

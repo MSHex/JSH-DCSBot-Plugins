@@ -14,12 +14,22 @@ the bot is not something to point at that table.
 #:
 #: The age guard is the safety rail: a session opened minutes ago is somebody
 #: flying right now, and its hop_off is supposed to be NULL.
+#:
+#: The outer GREATEST is the OTHER guard, and shipping without it was a bug.
+#: close_all_statistics sets a mission's end to the NEXT mission's start minus
+#: one second, so a session that opened after that boundary has a hop_on LATER
+#: than its own mission's recorded end. Closing it against that end wrote
+#: hop_off < hop_on, and every tsrange(hop_on, hop_off) in the bot -- rankstatus,
+#: CreditSystem, AwardAutomation -- then raised
+#: "range lower bound must be less than or equal to range upper bound".
 CLOSE_ORPHANS = """
     UPDATE statistics s
-       SET hop_off = COALESCE(
-               m.mission_end,
-               (SELECT MAX(s2.hop_off) FROM statistics s2
-                 WHERE s2.mission_id = s.mission_id),
+       SET hop_off = GREATEST(
+               COALESCE(
+                   m.mission_end,
+                   (SELECT MAX(s2.hop_off) FROM statistics s2
+                     WHERE s2.mission_id = s.mission_id),
+                   s.hop_on + INTERVAL '1 minute'),
                s.hop_on + INTERVAL '1 minute')
       FROM missions m
      WHERE m.id = s.mission_id

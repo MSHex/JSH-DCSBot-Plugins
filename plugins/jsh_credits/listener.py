@@ -79,7 +79,34 @@ class CreditsEventListener(EventListener["Credits"]):
 
     @staticmethod
     def _message(config: dict, name: str, default: str = '') -> str:
+        """
+        The configured text, or '' to send nothing.
+
+        `messages_enabled: false` silences all of them at once, which is the
+        per-instance switch: blanking four keys in an instance section works
+        too, but has to be repeated for every message anyone ever adds.
+        Every call site already guards on a falsy return.
+        """
+        if not config.get('messages_enabled', True):
+            return ''
         return config.get('messages', {}).get(name, default)
+
+    @staticmethod
+    def _timeout(config: dict) -> int:
+        """
+        Seconds the in-game popup stays up.
+
+        -1 is DCSServerBot's own sentinel for "use the server's
+        message_timeout", which is what Player.sendPopupMessage does with it,
+        so leaving the key unset keeps the previous behaviour exactly.
+        """
+        value = config.get('message_timeout')
+        if value is None:
+            return -1
+        try:
+            return max(1, int(value))
+        except (TypeError, ValueError):
+            return -1
 
     @staticmethod
     def _partial_event(config: dict, why: str) -> str:
@@ -174,7 +201,7 @@ class CreditsEventListener(EventListener["Credits"]):
         message = self._message(config, 'held')
         if message:
             await player.sendUserMessage(message.format(
-                points=points, total=total, reason=label))
+                points=points, total=total, reason=label), self._timeout(config))
 
     async def _drop(self, server: Server, ucid: str, why: str) -> None:
         """
@@ -226,7 +253,8 @@ class CreditsEventListener(EventListener["Credits"]):
         message = self._message(config, name)
         if message:
             await player.sendUserMessage(message.format(
-                points=pending, kept=kept, lost=pending - kept, reason=why))
+                points=pending, kept=kept, lost=pending - kept, reason=why),
+                self._timeout(config))
 
     async def _drop_server(self, server: Server, why: str) -> None:
         """Discard every pending bucket on one server."""
@@ -306,7 +334,7 @@ class CreditsEventListener(EventListener["Credits"]):
         if message:
             await player.sendUserMessage(message.format(
                 points=points, old_points=old_points, new_points=player.points,
-                place=place or 'base', reason=detail))
+                place=place or 'base', reason=detail), self._timeout(config))
 
     # ------------------------------------------------------------------
     # kill scoring

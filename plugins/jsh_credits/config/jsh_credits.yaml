@@ -62,6 +62,22 @@ DEFAULT:
   # {reason} in `lost` and `salvaged` is one of: crash, eject, pilot_death,
   # self_kill, disconnect, slot change.
 
+  # false silences every message below on this server in one go, which is the
+  # per-instance switch -- blanking the keys individually works too, but has to
+  # be repeated for every message added later. Payouts, the ledger and the
+  # pending bucket are untouched; only the pilot stops being told.
+  messages_enabled: true
+
+  # Seconds the in-game popup stays on screen. Each message is sent twice: as a
+  # popup, which this governs, and into the chat window, which keeps it for the
+  # rest of the session either way.
+  #
+  # Leave it out to use the bot's own `message_timeout` from servers.yaml
+  # (10 seconds unless you changed it). The payout message in particular is
+  # worth longer than 10 -- it carries the balance either side, and 10 seconds
+  # is not enough to read it while taxiing.
+  message_timeout: 20
+
   messages:
     held: 'Pending: +{points} ({reason}). Total pending {total} - land at a friendly base to collect.'
     paid: 'Credits collected at {place}: +{points}. Balance {old_points} -> {new_points}.'
@@ -170,3 +186,9 @@ DEFAULT:
 #
 # DCS.release_server:
 #   multiplier: 2.0
+#
+# Or keep the credits working but stop talking about it on a server where the
+# popups get in the way:
+#
+# DCS.Foothold:
+#   messages_enabled: false

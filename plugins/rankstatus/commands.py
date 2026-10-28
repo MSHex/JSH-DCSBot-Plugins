@@ -229,36 +229,36 @@ class RankStatus(Plugin):
         except Exception:
             return None
 
-    async def get_granted_rank(self, ucid: str) -> tuple[Optional[dict], Optional[str]]:
+    async def get_granted_rank(self, ucid: str) -> Optional[dict]:
         """
-        The pilot's manually granted rank as an achievement-shaped dict, plus
-        its name, or (None, None).
+        The pilot's manually granted rank as an achievement-shaped dict, or
+        None.
 
         Returns the creditsystem.yaml shape so the embed renders it through
         the paths it already has, rather than growing a second one.
         """
         grants = self._grants_module()
         if not grants:
-            return None, None
+            return None
         try:
             async with self.apool.connection() as conn:
                 cursor = await conn.execute(grants.GRANTS_TABLE_EXISTS)
                 if not (await cursor.fetchone())[0]:
-                    return None, None
+                    return None
                 cursor = await conn.execute(grants.GRANT_FOR_UCID, (ucid, ucid))
                 row = await cursor.fetchone()
             if not row:
-                return None, None
+                return None
             name = row[0]
             # The granted_ranks block is global, so DEFAULT is the right read.
             config = self.get_config(plugin_name='jsh_ranks') or {}
             spec = grants.resolve_spec(config.get('granted_ranks') or {}, name)
-            return grants.as_achievement(name, spec), name
+            return grants.as_achievement(name, spec)
         except Exception as ex:
             # A missing plugin, a missing table or a config gap must never
             # take down /pilot status; the earned rank is still correct.
             self.log.debug(f"RankStatus: could not read granted rank for {ucid}: {ex}")
-            return None, None
+            return None
 
     def get_achievement_name(self, achievement: dict | None) -> str:
         if not achievement:
@@ -326,11 +326,14 @@ class RankStatus(Plugin):
         credits = int(campaign['credits'])
         playtime = int(campaign['playtime']) / 3600.0
         current_rank, next_rank = get_rank_progress(achievements, credits, playtime)
-        # A granted rank overrides what is DISPLAYED as the current rank, but
-        # never what is computed: current_rank and next_rank stay the earned
-        # ones, so Promotion Progress keeps telling the truth about credits
-        # and flight time underneath the granted title.
-        granted_rank, granted_name = await self.get_granted_rank(ucid)
+        # A granted rank replaces the earned one outright: it is a position,
+        # not a milestone, so there is nothing left to progress toward and the
+        # earned rung underneath it is not shown. Credits and flight time are
+        # still displayed -- those are facts about the pilot either way, and
+        # they keep accruing for when a grant is revoked.
+        granted_rank = await self.get_granted_rank(ucid)
+        if granted_rank:
+            next_rank = None
         is_self = member.id == interaction.user.id
         can_view_private = is_self or utils.check_roles(
             self.bot.roles.get('DCS Admin', []), interaction.user)
@@ -360,13 +363,10 @@ class RankStatus(Plugin):
             color=discord.Color.blue()
         )
         embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
-        earned_name = self.get_achievement_name(current_rank)
-        if granted_rank:
-            rank_value = (f"**{self.get_achievement_name(granted_rank)}**\n"
-                          + _('*granted · earned: {rank}*').format(rank=earned_name))
-        else:
-            rank_value = f"**{earned_name}**"
-        embed.add_field(name=_('🎖️ Current Rank'), value=rank_value, inline=True)
+        display_rank = granted_rank or current_rank
+        embed.add_field(
+            name=_('🎖️ Current Rank'),
+            value=f"**{self.get_achievement_name(display_rank)}**", inline=True)
         embed.add_field(name=_('💳 Available Credits'), value=f"**{credits:,}**", inline=True)
         embed.add_field(name=_('⏱️ Campaign Flight Time'), value=f"**{format_playtime(playtime)}**", inline=True)
 
@@ -397,7 +397,10 @@ class RankStatus(Plugin):
             embed.add_field(name=_('📈 Promotion Progress'), value='\n'.join(progress), inline=False)
         else:
             embed.add_field(
-                name=_('📈 Promotion Progress'), value=_('🏆 Maximum campaign rank achieved.'), inline=False)
+                name=_('📈 Promotion Progress'),
+                value=(_('🏆 Granted rank — outside the campaign ladder.') if granted_rank
+                       else _('🏆 Maximum campaign rank achieved.')),
+                inline=False)
 
         kills = int(combat['kills'])
         deaths = int(combat['deaths'])

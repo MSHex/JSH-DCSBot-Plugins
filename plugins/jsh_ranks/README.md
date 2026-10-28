@@ -252,16 +252,24 @@ rather than as a ladder rung nobody can reach.
 with its `badge.img` as the embed thumbnail:
 
 ```
-🎖️ Current Rank
-General (O-10)
-granted · earned: Captain (O-3)
+🎖️ Current Rank          💳 Available Credits     ⏱️ Campaign Flight Time
+General (O-10)           17,577                   313h 2m
+
+📈 Promotion Progress
+🏆 Granted rank — outside the campaign ladder.
 ```
 
-**Promotion Progress is unchanged and still counts the earned ladder.** The
-grant overrides what is *displayed*, never what is computed, so credits and
-flight time keep tracking toward the next real rung underneath the granted
-title. A granted rank with no `badge.img` falls back to the earned rank's
-artwork rather than leaving the embed without a thumbnail.
+**A granted rank replaces the earned one outright.** It is a position rather
+than a milestone, so there is nothing left to progress toward: no target rank,
+no credits or hours remaining, and the earned rung underneath is not shown at
+all. It reads the way the top of the ladder reads.
+
+Credits and flight time are still displayed, because they are facts about the
+pilot either way — and they keep accruing, so revoking a grant returns the
+pilot to the correct earned rank with no catching up to do.
+
+A granted rank with no `badge.img` falls back to the earned rank's artwork
+rather than leaving the embed without a thumbnail.
 
 The lookup lives in `jsh_ranks/grants.py`, which imports nothing from
 DCSServerBot, discord or any other plugin. `rankstatus` imports it lazily, at

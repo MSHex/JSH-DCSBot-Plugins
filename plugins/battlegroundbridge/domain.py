@@ -583,3 +583,39 @@ class ImportSummary:
         if self.skipped:
             parts.append(f"{len(self.skipped)} skipped")
         return ', '.join(parts)
+
+
+#: Slots DCS gives no controllable unit for. A mark placed from one of these
+#: carries NO initiator, which is why Tactical Commander and Game Master
+#: reports were refused outright.
+#:
+#: DCS numbers them per coalition -- artillery_commander_blue_1,
+#: artillery_commander_blue_2 -- so these are matched as prefixes, not as exact
+#: names. An exact-name list silently matches nothing on a real server.
+COMMANDER_SLOTS = frozenset({
+    'instructor',
+    'artillery_commander',
+    'forward_observer',
+    'game-master',
+    'gamemaster',
+    'observer',
+    'spectator',
+})
+
+
+def is_commander_slot(unit_type, slot=None, slots=COMMANDER_SLOTS) -> bool:
+    """
+    True when the player occupies a slot with no controllable unit.
+
+    Both the unit type and the slot name are checked, because DCSServerBot
+    reports these differently depending on how the slot was entered and we
+    only need one of them to name it.
+    """
+    for value in (unit_type, slot):
+        name = str(value or '').strip().lower()
+        if not name:
+            continue
+        for commander in slots:
+            if name == commander or name.startswith(commander + '_'):
+                return True
+    return False

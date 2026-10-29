@@ -7,8 +7,8 @@ from discord import app_commands
 from services.bot import DCSServerBot
 from typing import Optional
 
-from .domain import (DeleteById, DeleteThisMarker, ImportSummary, IntelUpsert, ParseError,
-                     parse_marker_command)
+from .domain import (COMMANDER_SLOTS, DeleteById, DeleteThisMarker, ImportSummary, IntelUpsert,
+                     ParseError, is_commander_slot, parse_marker_command)
 from .listener import BridgeEventListener
 from .store import (AlreadyDone, BridgeStore, Created, Deleted, Denied, NotFound, Updated)
 
@@ -186,7 +186,7 @@ class BattlegroundBridge(Plugin[BridgeEventListener]):
         if command is None:
             return True
 
-        player = self.resolve_player(server, raw)
+        player = self.resolve_player(server, raw) or self.resolve_commander(server, raw)
 
         if isinstance(command, ParseError):
             await self.notify(player, f"Intel: {command.reason}")
@@ -250,6 +250,54 @@ class BattlegroundBridge(Plugin[BridgeEventListener]):
         matches = [player for player in server.get_active_players()
                    if player.name == name and player.unit_name == unit]
         return matches[0] if len(matches) == 1 else None
+
+    def resolve_commander(self, server: Server, raw: dict) -> Optional[Player]:
+        """
+        Fall back to the one commander on this coalition.
+
+        DCS attaches no initiator to a mark placed from a slot with no
+        controllable unit -- Tactical Commander, Game Master, instructor,
+        spectator -- so resolve_player() has nothing to match on and these
+        reports were simply refused. That is most of what a GM does.
+
+        The bot knows what resolve_player() cannot: who is connected and what
+        slot each of them occupies. When exactly ONE player on the marker's
+        coalition is sitting in such a slot, they are the only person who could
+        have placed it from one, so attributing it to them is sound rather than
+        a guess.
+
+        When two are, it IS a guess, and the wrong one would file a report under
+        someone else's name and let them delete it -- so it refuses, as before.
+        Pilots in aircraft are never candidates: a mark from an aircraft carries
+        its initiator and never reaches here.
+        """
+        side = raw.get('coalition')
+        try:
+            side = int(side)
+        except (TypeError, ValueError):
+            return None
+        if side not in (1, 2):  # neutral marks belong to nobody
+            return None
+        configured = self.get_config(server).get('commander_slots')
+        slots = frozenset(s.lower() for s in configured) if configured else COMMANDER_SLOTS
+        candidates = []
+        for candidate in server.get_active_players():
+            if not getattr(candidate, 'ucid', None):
+                continue
+            # Player.side is a Side enum (RED = 1, BLUE = 2), matching DCS's
+            # own coalition numbering, but be tolerant of a bare int.
+            their_side = getattr(candidate, 'side', None)
+            their_side = getattr(their_side, 'value', their_side)
+            if their_side != side:
+                continue
+            if is_commander_slot(getattr(candidate, 'unit_type', None),
+                                 getattr(candidate, 'slot', None), slots):
+                candidates.append(candidate)
+        if len(candidates) == 1:
+            self.log.debug(f"BgBridge: attributing an uninitiated marker on {server.name} "
+                           f"to {candidates[0].name}, the only commander on coalition {side}")
+            return candidates[0]
+        return None
 
     async def log_unidentified(self, server: Server, raw: dict, text: str) -> None:
         prefix = self.bot.node.config.get('chat_command_prefix', '-')

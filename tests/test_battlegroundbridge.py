@@ -621,3 +621,42 @@ class TestImportSummary:
 
     def test_describe_minimal(self):
         assert d.ImportSummary(imported=3).describe() == '3 imported'
+
+
+# --------------------------------------------------------------- commander slots
+# DCS attaches no initiator to a mark placed from a slot with no controllable
+# unit, so Tactical Commander and Game Master reports were refused outright.
+# These are the slot names as a real server reports them -- note the coalition
+# numbering, which an exact-name list would silently fail to match.
+@pytest.mark.parametrize("unit_type,slot,expected", [
+    ('artillery_commander_blue_1', None, True),
+    ('artillery_commander_blue_2', None, True),
+    (None, 'artillery_commander_blue_1', True),
+    ('instructor', None, True),
+    (None, 'instructor', True),
+    ('gamemaster', None, True),
+    ('game-master', None, True),
+    ('forward_observer_red_1', None, True),
+    ('INSTRUCTOR', None, True),
+    ('FA-18C_hornet', None, False),
+    ('AH-64D_BLK_II (Crew)', None, False),
+    ('C-130J-30', 'C-130J-30', False),
+    (None, None, False),
+    ('', '', False),
+])
+def test_is_commander_slot(unit_type, slot, expected):
+    assert d.is_commander_slot(unit_type, slot) is expected
+
+
+def test_commander_slots_are_matched_as_prefixes():
+    """The bug this guards: DCS numbers these per coalition."""
+    for base in d.COMMANDER_SLOTS:
+        assert d.is_commander_slot(f"{base}_blue_1")
+        assert d.is_commander_slot(base)
+
+
+def test_a_configured_slot_list_still_matches_numbers():
+    assert d.is_commander_slot('artillery_commander_blue_1', None,
+                                    frozenset({'artillery_commander'}))
+    assert not d.is_commander_slot('instructor', None,
+                                        frozenset({'artillery_commander'}))

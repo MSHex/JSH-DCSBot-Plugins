@@ -248,8 +248,14 @@ From a commander slot, place a marker reading:
 cbuy: zhawk
 ```
 
-using the same item ids as Foothold's `buy:`. The marker is removed once
-handled and the result is announced to the coalition.
+using the same item ids as Foothold's `buy:`. **Place the marker on the zone
+you are buying for** — zone-targeted items (`zsam`, `zhawk`, `supplies`) take
+their target from where the marker sits, exactly as Foothold's own `buy:`
+does. A marker placed outside any zone gets Foothold's *"choose a zone from
+shop menu"*.
+
+The marker is removed once handled and the result is announced to the
+coalition.
 
 **Nothing in Foothold is modified**, so a Foothold update cannot undo it. The
 cost is that this leans on Foothold's internals — `_G.bc`,

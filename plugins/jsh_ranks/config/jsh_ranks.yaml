@@ -168,8 +168,13 @@ DEFAULT:
   #
   #     cbuy: zhawk
   #
-  # using the same item ids as Foothold's own `buy:`. The marker is removed once
-  # handled, and the result is announced to the coalition.
+  # using the same item ids as Foothold's own `buy:`. PLACE THE MARKER ON THE
+  # ZONE you are buying for: zone-targeted items (zsam, zhawk, supplies) take
+  # their target from where the marker sits, exactly as `buy:` does. A marker
+  # outside any zone gets Foothold's "choose a zone from shop menu".
+  #
+  # The marker is removed once handled, and the result is announced to the
+  # coalition.
   #
   # `cbuy:` rather than `buy:` deliberately: Foothold's handler still fires on
   # `buy:` and would print "insufficient rank" beside a successful purchase,

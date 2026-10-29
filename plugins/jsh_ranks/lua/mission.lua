@@ -197,7 +197,17 @@ function JR.doBuy(event, item)
   end
   log('cbuy ' .. tostring(item) .. ' by ' .. (name or ('commander of coalition ' .. tostring(side)))
       .. ' at level ' .. level)
-  bc:buyShopItem(side, item, nil, nil, nil)
+  -- The same alternateParams Foothold's own `buy:` builds
+  -- (zoneCommanderv2.lua:25169). Without them a zone-targeted item -- zsam,
+  -- zhawk, supplies -- has no target and Foothold answers "choose a zone from
+  -- shop menu", which is what passing nil here produced. The zone comes from
+  -- where the marker was placed, exactly as `buy:` derives it.
+  local zone
+  if bc.getZoneOfPoint then
+    local ok, got = pcall(function() return bc:getZoneOfPoint(event.pos) end)
+    if ok then zone = got end
+  end
+  bc:buyShopItem(side, item, { zone = zone, point = event.pos, coalition = side }, nil, nil)
 end
 
 function JR.onMarkEvent(event)

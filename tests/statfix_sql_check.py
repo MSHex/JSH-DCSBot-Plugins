@@ -47,6 +47,13 @@ INSERT INTO statistics VALUES (1,'joker','F-16C_50','2026-07-28 22:05:00','2026-
 -- An orphan old enough to close
 INSERT INTO missions VALUES (2,'Server One','2026-09-16 18:00','2026-09-16 22:30');
 INSERT INTO statistics VALUES (2,'toby','AH-64D_BLK_II','2026-09-16 19:00',NULL,0,0,0);
+-- THE BUG THAT SHIPPED: close_all_statistics sets a mission's end to the NEXT
+-- mission's start minus one second, so a session can open AFTER its own
+-- mission's recorded end. Closing it against that end wrote hop_off < hop_on,
+-- and every tsrange(hop_on, hop_off) in the bot then raised
+-- "range lower bound must be less than or equal to range upper bound".
+INSERT INTO missions VALUES (4,'JSH Co-op','2026-09-16 18:00','2026-09-16 20:00:00');
+INSERT INTO statistics VALUES (4,'joker','UH-1H','2026-09-16 20:14:43',NULL,0,0,0);
 -- A LIVE session: open, started minutes ago. Must survive untouched.
 INSERT INTO missions VALUES (3,'JSH Foothold Alpha', now() AT TIME ZONE 'utc' - INTERVAL '2 hours', NULL);
 INSERT INTO statistics VALUES (3,'live','FA-18C_hornet',
@@ -114,13 +121,22 @@ checks.append(("run-log statements prepare against tables.sql", "ok", "ok", True
 
 before = run(f"COPY ({S.TOTAL_HOURS}) TO STDOUT").strip()
 # 323.18 (Toby's fortnight) + 327.17 (Joker's) + 2.75 (one real sortie)
-eq("hours before the repair", before, "653.10")
+eq("hours before the repair", before, "653.10")  # the two orphans are still open here
 
 pre = run(f"COPY ({bind(S.PREVIEW, {'min_age': chr(39)+'6 hours'+chr(39)})}) TO STDOUT").strip()
-eq("preview counts orphans/machine-closed/overlapping", pre, "1\t2\t1")
+eq("preview counts orphans/machine-closed/overlapping", pre, "2\t2\t1")
 
-eq("pass 1 closed exactly the one stale orphan",
-   update(f"{bind(S.CLOSE_ORPHANS, {'min_age': chr(39)+'6 hours'+chr(39)})};"), 1)
+eq("pass 1 closed both stale orphans",
+   update(f"{bind(S.CLOSE_ORPHANS, {'min_age': chr(39)+'6 hours'+chr(39)})};"), 2)
+
+# The guard that was missing when jsh_statfix 1.0 shipped.
+eq("a mission ending BEFORE a session started never reverses it",
+   run("""COPY (SELECT count(*) FROM statistics
+          WHERE hop_off IS NOT NULL AND hop_off < hop_on) TO STDOUT""").strip(), "0")
+eq("that session gets a minimum length instead",
+   run("""COPY (SELECT hop_off FROM statistics
+          WHERE player_ucid='joker' AND slot='UH-1H') TO STDOUT""").strip(),
+   "2026-09-16 20:15:43")
 
 eq("pass 2 corrected only the session with events",
    update(f"{bind(S.CORRECT_BY_EVENTS, {'grace': chr(39)+'15 minutes'+chr(39)})};"), 1)
@@ -138,6 +154,16 @@ eq("the live session was not touched",
 eq("no session was lengthened",
    run("""COPY (SELECT count(*) FROM statistics WHERE hop_off IS NOT NULL
           AND hop_off <= hop_on) TO STDOUT""").strip(), "0")
+
+# What /pilot status, AwardAutomation and CreditSystem all do. Counting
+# hop_off <= hop_on is the same check, but building the range is the thing
+# that actually threw in production, so assert on that directly.
+eq("every closed session can build a tsrange",
+   run("""COPY (SELECT count(*) FROM statistics
+          WHERE hop_off IS NOT NULL
+            AND tsrange(hop_on, hop_off) IS NOT NULL) TO STDOUT""").strip(),
+   run("""COPY (SELECT count(*) FROM statistics
+          WHERE hop_off IS NOT NULL) TO STDOUT""").strip())
 
 eq("Toby's fortnight became a real sortie",
    run("""COPY (SELECT round(extract(epoch from (hop_off-hop_on))/3600.0,2)

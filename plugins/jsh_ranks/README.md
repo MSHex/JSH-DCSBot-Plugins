@@ -228,6 +228,49 @@ Grants live in `jsh_rank_grants` and are not tied to a campaign or a server, so
 they survive a campaign reset — unlike the credits and playtime the earned
 ladder is read from.
 
+## `cbuy:` — buying from a commander slot
+
+Foothold's own `buy:` marker **cannot** work from a Tactical Commander or Game
+Master slot, and that is a DCS limitation rather than a Foothold bug. DCS
+attaches no initiator to a mark placed from a slot with no controllable unit,
+so `zoneCommanderv2.lua` leaves the rank at `0` and refuses every gated item.
+Mission-side Lua cannot identify such a player either —
+`coalition.getPlayers()` returns units, and a commander has none.
+
+The bot can, because it knows who is connected and in which slot. It pushes the
+commanding level per coalition on every refresh, and the injected mission script
+authorises `cbuy:` against that before calling Foothold's own `buyShopItem`,
+which has no rank check of its own.
+
+From a commander slot, place a marker reading:
+
+```
+cbuy: zhawk
+```
+
+using the same item ids as Foothold's `buy:`. The marker is removed once
+handled and the result is announced to the coalition.
+
+**Nothing in Foothold is modified**, so a Foothold update cannot undo it. The
+cost is that this leans on Foothold's internals — `_G.bc`,
+`bc.shops[coalition][id].reqRank` and the `buyShopItem` signature. If a future
+Foothold renames those, `cbuy` stops working and says so in `dcs.log`, which is
+a better failure than a patched file silently reverting on update and nobody
+noticing until someone cannot buy a Patriot.
+
+`cbuy:` rather than `buy:` is deliberate: Foothold's handler still fires on
+`buy:` and would print *"insufficient rank"* beside a successful purchase, and
+its handler cannot be stopped without editing it. Foothold matches nothing on
+`cbuy:`, so only this code answers.
+
+The **highest-ranked** commander on a coalition sets the level. Unlike
+attributing an intel report, two commanders is not a reason to refuse — nobody's
+name goes on a purchase, and refusing while two admins are on the map is the
+failure this exists to remove.
+
+Requires `RankingSystem = true` in `Foothold_Config.lua`. With it `false`,
+Foothold applies no gates at all and `cbuy` simply buys.
+
 ## What this does not change
 
 Foothold's own rank credits keep accruing underneath, and

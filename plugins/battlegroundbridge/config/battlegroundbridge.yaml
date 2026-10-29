@@ -83,6 +83,28 @@ DEFAULT:
       #   colour: "#0068ff"
       #   label: "{name} Coverage"
 
+  # Slots DCS gives no controllable unit for. A mark placed from one carries
+  # NO initiator, so the bot cannot see who placed it from the event alone --
+  # which is why Tactical Commander and Game Master reports used to be refused.
+  #
+  # When exactly ONE player on the marker's coalition is in such a slot, the
+  # report is attributed to them: they are the only person who could have
+  # placed it from one. With two, it would be a guess, and the wrong guess
+  # files a report under someone else's name and lets them delete it -- so it
+  # still refuses, and says so in the log.
+  #
+  # Matched as PREFIXES, because DCS numbers them per coalition:
+  # artillery_commander_blue_1, forward_observer_red_2. Listing the bare name
+  # covers every numbered variant.
+  commander_slots:
+    - instructor
+    - artillery_commander
+    - forward_observer
+    - game-master
+    - gamemaster
+    - observer
+    - spectator
+
   admin_roles: [DCS Admin, GameMaster]
   # UCIDs that may manage other players' reports even without a linked Discord
   # account. Real UCIDs must never be committed to a repository.

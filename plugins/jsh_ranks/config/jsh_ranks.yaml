@@ -145,6 +145,45 @@ DEFAULT:
   # Foothold's own ranks stop at 20, so that is the ceiling for a granted rank
   # too; a higher number is simply clamped by the mission.
 
+  # --------------------------------------------- cbuy: for commanders
+  #
+  # Foothold's own `buy:` marker CANNOT work from a Tactical Commander or Game
+  # Master slot, and this is a DCS limitation rather than a Foothold bug: DCS
+  # attaches no initiator to a mark placed from a slot with no controllable
+  # unit, so zoneCommanderv2.lua leaves the rank at 0 and refuses every gated
+  # item. Mission-side Lua cannot identify such a player either --
+  # coalition.getPlayers() returns units, and a commander has none.
+  #
+  # The bot can, because it knows who is connected and in which slot. It pushes
+  # the commanding level per coalition on every refresh, and the mission script
+  # authorises `cbuy:` against that before calling Foothold's own buyShopItem.
+  #
+  # NOTHING IN FOOTHOLD IS MODIFIED, so a Foothold update cannot undo it. The
+  # cost is that this leans on Foothold's internals -- _G.bc,
+  # bc.shops[coalition][id].reqRank, and the buyShopItem signature. If a future
+  # Foothold renames those, cbuy stops working and says so in dcs.log, which is
+  # a better failure than a patched file silently reverting on update.
+  #
+  # Usage, from a commander slot: place a marker reading
+  #
+  #     cbuy: zhawk
+  #
+  # using the same item ids as Foothold's own `buy:`. The marker is removed once
+  # handled, and the result is announced to the coalition.
+  #
+  # `cbuy:` rather than `buy:` deliberately: Foothold's handler still fires on
+  # `buy:` and would print "insufficient rank" beside a successful purchase,
+  # and its handler cannot be stopped without editing it. Foothold matches
+  # nothing on `cbuy:`.
+  #
+  # The HIGHEST-ranked commander on a coalition sets the level. Unlike
+  # attributing an intel report, two commanders is not a reason to refuse --
+  # nobody's name goes on a purchase, and refusing while two admins are on the
+  # map is the failure this exists to remove.
+  #
+  # Requires RankingSystem = true in Foothold_Config.lua. With it false,
+  # Foothold applies no gates at all and cbuy simply buys.
+
   # Optional, and unnecessary with a name-matched rank_map: Foothold's own names
   # already agree with Discord. Only worth setting if you compress several
   # Discord ranks onto one level, where these name the band rather than the

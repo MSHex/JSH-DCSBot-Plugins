@@ -9,7 +9,7 @@ from psycopg.rows import dict_row
 from services.bot import DCSServerBot
 from typing import Optional
 
-from . import grants
+from . import grants, slots
 from .listener import RanksEventListener
 
 #: One UDP datagram. DCS reads with LuaSocket's 8192-byte default and
@@ -306,6 +306,12 @@ class Ranks(Plugin[RanksEventListener]):
             details.append({
                 'name': player.name,
                 'ucid': player.ucid,
+                # Carried so commander_levels() can tell a map-only slot from a
+                # cockpit; both are read because DCSServerBot fills them
+                # differently depending on how the slot was entered.
+                'slot': getattr(player, 'slot', None),
+                'unit_type': getattr(player, 'unit_type', None),
+                'side': getattr(player, 'side', None),
                 'rank': granted or self.rank_name(server, credits, playtime),
                 'granted': bool(grant),
                 'reason': grant.get('reason') if grant else None,
@@ -344,14 +350,22 @@ class Ranks(Plugin[RanksEventListener]):
         """Sends the current levels to the mission. Returns how many were sent."""
         if not self.enabled(server) or server.status not in RUNNING:
             return 0
-        levels = await self.levels_for_server(server)
+        details = await self.details_for_server(server)
+        levels = {d['name']: d['level'] for d in details}
         config = self.get_config(server)
+        # The level a `cbuy:` from a commander slot is authorised against.
+        # Mission-side Lua cannot identify such a player at all, so this is the
+        # only way the mission can know what rank is commanding.
+        commanders = slots.commander_levels(details)
         await server.send_to_dcs({
             'command': 'jshRanksRun',
             'lua': (f'if jsh_ranks then jsh_ranks.set({lua_value(levels)}, '
-                    f'{lua_value(config.get("level_names") or {})}) end')
+                    f'{lua_value(config.get("level_names") or {})}) '
+                    f'if jsh_ranks.setCommanders then '
+                    f'jsh_ranks.setCommanders({lua_value(commanders)}) end end')
         })
-        self.log.debug(f"JSH Ranks: pushed {len(levels)} rank(s) to {server.name}")
+        self.log.debug(f"JSH Ranks: pushed {len(levels)} rank(s) to {server.name}"
+                       + (f", commanders {commanders}" if commanders else ""))
         return len(levels)
 
     # ------------------------------------------------------------ commands

@@ -3,6 +3,7 @@ import io
 import json
 import os
 
+import discord
 import matplotlib
 matplotlib.use('Agg')                      # no display on a headless node
 import matplotlib.pyplot as plt            # noqa: E402
@@ -186,6 +187,60 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
         self.log.info(f"JSH TrapSheet: stored a pass for {player.name} on "
                       f"{server.name} ({len(points)} samples, "
                       f"grade={grade or 'none'})")
+
+        await self.post(server, player, config, image, grade, comment,
+                        pass_.get('carrier') or '', wire, tgroove)
+
+    # ------------------------------------------------------------------- post
+    async def post(self, server: Server, player: Player, config: dict,
+                   image: bytes | None, grade: str | None, comment: str,
+                   carrier: str, wire: int | None, tgroove: float | None) -> None:
+        """
+        Put the trapsheet in a Discord channel.
+
+        greenieboard posts a one-line text message to the server's events
+        channel and never attaches the picture -- the image it stores is only
+        seen if somebody runs /traps. That is the gap this fills: the plot is
+        worth nothing sitting in a BYTEA column nobody queries.
+
+        `channel` is optional. Unset means post nothing, which is the right
+        default for an instance where this would be noise.
+        """
+        if image is None:
+            return
+        channel_id = config.get('channel')
+        if not channel_id:
+            return
+        channel = self.bot.get_channel(int(channel_id))
+        if channel is None:
+            self.log.warning(f"JSH TrapSheet: channel {channel_id} is not "
+                             f"reachable; the pass was stored but not posted.")
+            return
+
+        title = f"{player.name} | {sheet.aircraft_label(player.unit_type or '')}"
+        if carrier:
+            title += f" | {carrier}"
+
+        embed = discord.Embed(title=title, colour=sheet.colour_of(grade))
+        embed.add_field(name="LSO Grade",
+                        value=sheet.grade_line(grade), inline=False)
+        if comment:
+            embed.add_field(name="LSO Comment", value=f"`{comment}`", inline=False)
+        if wire:
+            embed.add_field(name="Wire", value=str(wire), inline=True)
+        if tgroove:
+            embed.add_field(name="Groove", value=f"{tgroove:.1f}s", inline=True)
+        embed.set_image(url="attachment://trapsheet.png")
+        embed.set_footer(text=server.name)
+
+        try:
+            await channel.send(
+                embed=embed,
+                file=discord.File(io.BytesIO(image), filename='trapsheet.png'))
+        except discord.DiscordException as ex:
+            # A posting failure must not lose the pass: it is already stored.
+            self.log.warning(f"JSH TrapSheet: could not post {player.name}'s "
+                             f"pass to {channel_id}: {ex}")
 
 
 async def setup(bot: DCSServerBot):

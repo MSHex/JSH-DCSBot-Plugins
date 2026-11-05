@@ -53,6 +53,16 @@ genuinely lost, such as a disconnect mid-pass.
 Rows go into greenieboard's own `traps` table, so `/greenieboard` and
 `/traps` show these passes with their trapsheet. There is no second board.
 
+### Posting
+
+Set `channel` to a Discord channel id and the trapsheet is posted there as
+an embed: grade and what it means, the LSO comment, wire, groove time, and
+the plot itself. Leave it out and nothing is posted.
+
+This is worth having because **greenieboard never posts the picture**. Its
+`send_chat_message()` puts a one-line text message in the server's events
+channel; the image it stores is only ever seen by somebody running `/traps`.
+
 ## How it works
 
 `lua/mission.lua` is injected on `registerDCSServer` and on
@@ -65,10 +75,16 @@ discards them if `grade_wait` elapses first.
 
 ### Angle of attack
 
-There is no `getAoA()` in the mission environment. AoA here is the geometric
-angle between the velocity vector and the airframe's longitudinal axis,
-computed from `getVelocity()` and the orthonormal basis in `getPosition()` —
-the same thing AIRBOSS does internally.
+There is no `getAoA()` in the mission environment. AoA here is the angle
+between the velocity vector and the airframe's longitudinal axis, computed
+from `getVelocity()` and the orthonormal basis in `getPosition()` — the same
+as MOOSE's `POSITIONABLE:GetAoA()`, which is what AIRBOSS calls.
+
+**The wind is subtracted first**, as MOOSE does. AoA is an aerodynamic
+angle, measured against the air and not the ground, and nowhere in DCS does
+that matter more: a recovery runs 25–35 kt over the deck. Using ground
+velocity biases AoA by most of a degree on a band only 1.4° wide (7.4–8.8),
+so an on-speed pilot would plot consistently low.
 
 It is in **degrees**. The Hornet's indexer units track degrees closely
 (on-speed 8.1), which is why the 7.4/8.8 reference band in the plot reads

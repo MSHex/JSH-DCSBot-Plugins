@@ -1,5 +1,11 @@
 DEFAULT:
   enabled: true
+  # Discord channel the trapsheet is posted to. Leave it out and nothing is
+  # posted -- the pass is still stored and still shows up in /traps.
+  # greenieboard itself only posts a one-line text message to the events
+  # channel and never attaches the picture, so without this the plot is only
+  # ever seen by someone running /traps.
+  # channel: 123456789012345678
   # Seconds between samples. 10 Hz is well above what the signals need:
   # glideslope and lineup are smooth, and AoA oscillates at roughly 0.5-2 Hz,
   # so this is comfortably past Nyquist. Going faster mainly samples DCS's own

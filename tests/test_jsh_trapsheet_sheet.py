@@ -127,6 +127,21 @@ eq("samples outside the wake do not count",
 eq("no samples yields no groove time", sheet.groove_time([], 0.1), None)
 eq("a zero rate cannot divide anything", sheet.groove_time(inside, 0), None)
 
+# ------------------------------------------------------------ presentation
+eq("a graded pass shows the grade and what it means",
+   sheet.grade_line('_OK_'), '**_OK_** \u2014 Unicorn \u2014 a perfect pass')
+eq("an ungraded pass says so rather than inventing one",
+   sheet.grade_line(None), 'Not graded')
+check("every grade that scores points also has wording",
+      all(g in sheet.GRADE_TEXT for g in sheet.POINTS),
+      "a grade with points but no text would post a bare letter")
+check("every grade that scores points also has a colour",
+      all(g in sheet.GRADE_COLOUR for g in sheet.POINTS))
+check("an unknown grade still gets a usable colour",
+      isinstance(sheet.colour_of('???'), int))
+check("no grade gets the neutral colour, not the good one",
+      sheet.colour_of(None) != sheet.colour_of('OK'))
+
 failed = [c for c in checks if not c[1]]
 for label, ok, detail in checks:
     if not ok:

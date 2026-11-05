@@ -41,6 +41,11 @@ class TrapSheetEventListener(EventListener["TrapSheet"]):
 
     @event(name="registerDCSServer")
     async def registerDCSServer(self, server: Server, data: dict) -> None:
+        config = self.plugin.get_config(server)
+        if config.get('channel'):
+            # Same check greenieboard does: fail loudly at startup if the
+            # channel is wrong, rather than silently on the first trap.
+            self.plugin.bot.check_channel(int(config['channel']))
         # Do not test server.status here. The mission plugin sets it inside
         # ITS OWN registerDCSServer handler and listener order across plugins
         # is not guaranteed, so RUNNING/PAUSED is always false at this point.

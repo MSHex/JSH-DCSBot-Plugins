@@ -69,6 +69,16 @@ end
 local function aoa(unit)
   local v = unit:getVelocity()
   local p = unit:getPosition()
+  -- AoA is an AERODYNAMIC angle: measured against the air, not the ground.
+  -- MOOSE's POSITIONABLE:GetAoA() subtracts the wind for exactly this
+  -- reason. It matters here more than almost anywhere else in DCS: a
+  -- recovery runs 25-35 kt over the deck, and using ground velocity biases
+  -- AoA by most of a degree on a band only 1.4 degrees wide (7.4 to 8.8),
+  -- so an on-speed pilot would plot consistently low.
+  local ok, w = pcall(atmosphere.getWindWithTurbulence, unit:getPoint())
+  if ok and w then
+    v = { x = v.x - w.x, y = v.y - w.y, z = v.z - w.z }
+  end
   local speed = math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
   if speed < 10 then return 0 end
   local fwd = v.x * p.x.x + v.y * p.x.y + v.z * p.x.z

@@ -120,7 +120,7 @@ opt_plugins:
   - awardautomation
 ```
 
-For customization, copy `plugins/awardautomation/config/config.yaml` to
+For customization, copy `plugins/awardautomation/config/awardautomation.yaml` to
 `config/plugins/awardautomation.yaml`. Configuration stored under `config/`
 is separate from the plugin and survives plugin replacement.
 

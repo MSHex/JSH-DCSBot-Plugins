@@ -32,7 +32,7 @@ CREATE TABLE statistics (mission_id INT, player_ucid TEXT, slot TEXT,
                          takeoffs INT DEFAULT 0, landings INT DEFAULT 0, kills INT DEFAULT 0);
 CREATE TABLE missionstats (id SERIAL PRIMARY KEY, mission_id INT, event TEXT,
                            init_id TEXT, "time" TIMESTAMP);
-INSERT INTO players VALUES ('toby','Toby'),('joker','Joker'),('live','Live');
+INSERT INTO players VALUES ('toby','Toby'),('joker','Joker'),('live','Live'),('grif','Griffin'),('douca','Douca');
 
 -- A mission record left open for a fortnight, closed long after the fact
 INSERT INTO missions VALUES (1,'JSH Dynamic Campaign','2026-07-24 18:00','2026-08-07 07:22:50');
@@ -72,6 +72,16 @@ INSERT INTO statistics VALUES (5,'toby','A-10C_2', '2026-10-20 20:00:13','2026-1
 INSERT INTO missions VALUES (7,'JSH Co-op','2026-10-22 18:00','2026-10-22 20:05:00');
 INSERT INTO statistics VALUES (7,'grif','F-16C_50','2026-10-22 20:00:00','2026-10-22 20:05:00',0,0,0);
 INSERT INTO statistics VALUES (7,'grif','A-10C_2', '2026-10-22 20:00:30','2026-10-22 21:00:00',1,1,0);
+-- THE BOT'S OWN SLOT-CHANGE ARTEFACT, which must never be rewritten.
+-- stop_player closes a session at GREATEST(hop_on + 1 second, now()), so an
+-- instant slot change leaves the next hop_on a few MILLISECONDS after this
+-- hop_on and about a second BEFORE this hop_off. GREATEST(next_hop_on,
+-- hop_on + 1 second) then equals the hop_off already stored, so without a
+-- "must shorten" guard the clip rewrites the same value on every run and
+-- never converges -- 3,860 rows for 0.0 hours on the live database.
+INSERT INTO missions VALUES (8,'JSH Co-op','2026-10-23 18:00','2026-10-23 23:00');
+INSERT INTO statistics VALUES (8,'douca','C-130J-30','2026-10-23 20:00:00','2026-10-23 20:00:01',0,0,0);
+INSERT INTO statistics VALUES (8,'douca','A-10C_2',  '2026-10-23 20:00:00.004','2026-10-23 20:45:00',1,1,0);
 -- SUB-SECOND SKEW: the bot closes one slot and opens the next from two
 -- separately-taken timestamps, so they cross by under a second. Not
 -- corruption; min_overlap must leave it alone.
@@ -146,7 +156,7 @@ checks.append(("run-log statements prepare against tables.sql", "ok", "ok", True
 
 before = run(f"COPY ({S.TOTAL_HOURS}) TO STDOUT").strip()
 # 323.18 (Toby's fortnight) + 327.17 (Joker's) + 2.75 (one real sortie)
-eq("hours before the repair", before, "656.18")  # the two orphans are still open here
+eq("hours before the repair", before, "656.93")  # the two orphans are still open here
 
 pre = run(f"COPY ({bind(S.PREVIEW, {'min_age': chr(39)+'6 hours'+chr(39), 'min_overlap': chr(39)+'60 seconds'+chr(39)})}) TO STDOUT").strip()
 eq("preview counts orphans/machine-closed/overlapping", pre, "2\t3\t2")
@@ -180,6 +190,10 @@ eq("and so does not overlap the slot taken one second later",
    run("""COPY (SELECT count(*) FROM statistics a JOIN statistics b
           ON a.player_ucid=b.player_ucid AND a.hop_on < b.hop_on
          AND b.hop_on < a.hop_off WHERE a.mission_id=5) TO STDOUT""").strip(), "0")
+eq("the bot's own 1-second slot-change artefact is never rewritten",
+   run("""COPY (SELECT hop_off FROM statistics
+          WHERE player_ucid='douca' AND slot='C-130J-30' AND mission_id=8) TO STDOUT""").strip(),
+   "2026-10-23 20:00:01")
 eq("a short clipped session ends where the next one starts, not a minute later",
    run("""COPY (SELECT hop_off FROM statistics
           WHERE player_ucid='grif' AND slot='F-16C_50' AND mission_id=7) TO STDOUT""").strip(),
@@ -195,9 +209,10 @@ eq("no overlap above the threshold remains",
          AND (a.mission_id, a.slot, a.hop_on) < (b.mission_id, b.slot, b.hop_on)
          AND a.hop_on < b.hop_off AND b.hop_on < a.hop_off
         WHERE a.hop_off IS NOT NULL AND b.hop_off IS NOT NULL
-          AND a.hop_off - b.hop_on > INTERVAL '60 seconds') TO STDOUT""").strip(), "0")
-eq("the sub-second one is still there, deliberately",
-   run(f"COPY ({S.OVERLAP_COUNT}) TO STDOUT").strip(), "1")
+          AND LEAST(a.hop_off, b.hop_off) - GREATEST(a.hop_on, b.hop_on)
+              > INTERVAL '60 seconds') TO STDOUT""").strip(), "0")
+eq("the sub-second slot-change artefacts are still there, deliberately",
+   run(f"COPY ({S.OVERLAP_COUNT}) TO STDOUT").strip(), "2")
 
 # The live session must be exactly as it was: still open.
 eq("the live session was not touched",
@@ -235,6 +250,19 @@ again = [update(f"{bind(S.CLOSE_ORPHANS, {'min_age': chr(39)+'6 hours'+chr(39)})
          update(f"{bind(S.CORRECT_BY_EVENTS, {'grace': chr(39)+'15 minutes'+chr(39)})};"),
          update(f"{bind(S.CLIP_OVERLAPS, {'min_overlap': chr(39)+'60 seconds'+chr(39)})};")]
 eq("running it again changes nothing (idempotent)", again, "[0, 0, 0]")
+
+# The one-off cleanup is run with the threshold dropped to zero, which is the
+# only way to reach rows already inflated below it. At that setting nothing
+# protects the pass from the bot's own slot-change artefact, so the clip must
+# refuse to write a value equal to the one already stored -- otherwise it
+# rewrites the same rows forever. On the live database that was 3,860 rows for
+# 0.0 hours, every single run.
+zero = chr(39) + '0 seconds' + chr(39)
+first = update(f"{bind(S.CLIP_OVERLAPS, {'min_overlap': zero})};")
+second = update(f"{bind(S.CLIP_OVERLAPS, {'min_overlap': zero})};")
+# The first pass legitimately clips what the 60-second threshold had skipped.
+# The guarantee is the SECOND one: nothing left to do.
+eq("a threshold-zero clip converges instead of rewriting forever", second, 0)
 
 for label, got, want, ok in checks:
     print(("  ok  " if ok else " FAIL "), label, "" if ok else f"-> {got!r} (wanted {want!r})")

@@ -104,21 +104,33 @@ before sending (it is ~4.9 KB). The samples travel the other way, through
 `dcsbot.sendBotTable`, which chunks at 65000 bytes and is reassembled by the
 bot with a 2 MB receive buffer. A 600-sample pass is nowhere near it.
 
-## Verify the axes against one real trap
+## Axes
 
-**Do this before trusting a plot.** Which way is "astern" and which is
-"starboard" is a sign convention, and a mirrored approach looks perfectly
-plausible until compared against a pass you remember flying.
+The frame was checked against MOOSE's source, not guessed:
 
-One thing to expect, because it looks wrong and is not: `trapsheet.py`
-rotates by `-9°` for the angled deck, so `Z` is relative to the **ship's
-axis**, not the landing centreline. A *well* lined-up approach therefore has
-`Z` growing with distance astern — roughly `X · tan(9°)` — and plots as a
-flat lineup trace. A `Z` of zero all the way down the groove plots as about
-860 ft of lineup error at 1 NM.
+- `Airboss.lua` `_GetDistances()` projects the carrier→player vector onto the
+  **ship's own orientation axes**, so `X` and `Z` are ship frame and `X` is
+  *negative* astern.
+- `Airboss.lua:19177` then writes `local b = -groove.X`, negating it, so the
+  CSV column `trapsheet.py` actually reads is **positive astern**. `Z` is
+  written raw — starboard positive.
 
-If the picture comes out mirrored, flip `invert_x` or `invert_z` in the
-config rather than editing the Lua.
+`relative()` in `lua/mission.lua` produces exactly that, projecting onto the
+carrier's own basis vectors (`p.x` forward, `p.z` starboard) rather than
+deriving a perpendicular by hand, so there is no second derivation to get
+backwards.
+
+`axes.invert_x` / `axes.invert_z` remain in the config as an escape hatch,
+but they should not be needed.
+
+### One thing that looks wrong and is not
+
+`trapsheet.py` rotates by `-9°` for the angled deck, and `Z` is relative to
+the **ship's axis**, not the landing centreline. So a well-lined-up approach
+has `Z` growing with distance astern — roughly `X · tan(9°)` — and plots as a
+flat lineup trace. A `Z` of zero all the way down the groove is an aircraft
+flying up the ship's *wake*, and plots as about 950 ft of lineup error at
+1 NM. That is the geometry working, not a bug.
 
 ## Configuration
 

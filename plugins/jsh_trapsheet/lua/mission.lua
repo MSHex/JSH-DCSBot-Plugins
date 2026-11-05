@@ -78,22 +78,28 @@ end
 
 -- Position of the aircraft in the carrier's own frame.
 --
--- X is distance ASTERN in metres and Z is lateral offset, which is the frame
--- trapsheet.py expects: it adds a 20 m offset to each and then rotates by
--- -9 degrees for the angled deck. The signs here are the ones to check
--- against a real trap first -- see `axes` in the config if either is mirrored.
+-- This matches what AIRBOSS puts in the CSV that trapsheet.py reads, which
+-- was checked against MOOSE's source rather than reasoned about:
+--
+--   Airboss.lua _GetDistances()  projects the carrier->player vector onto the
+--                                ship's OWN orientation axes, so X and Z are
+--                                ship frame, and X is NEGATIVE astern.
+--   Airboss.lua:19177            writes `local b = -groove.X`, negating it, so
+--                                the CSV column is POSITIVE astern.
+--                                Z is written raw: starboard positive.
+--
+-- Hence `-fwd` below. Projecting onto the ship's own basis vectors rather
+-- than deriving a perpendicular by hand is deliberate: it is the same
+-- primitive AIRBOSS uses, so there is no second derivation to get backwards.
 local function relative(unit, carrier)
   local u, c = unit:getPoint(), carrier:getPoint()
-  local cp = carrier:getPosition()
-  -- Ship's heading as a unit vector in the world x/z plane.
-  local hx, hz = cp.x.x, cp.x.z
-  local n = math.sqrt(hx * hx + hz * hz)
-  if n < 1e-6 then return nil end
-  hx, hz = hx / n, hz / n
-  local dx, dz = u.x - c.x, u.z - c.z
-  local fwd = dx * hx + dz * hz            -- + ahead of the ship
-  local lat = -dx * hz + dz * hx           -- + to starboard
-  return -fwd, lat, (u.y - c.y) * FEET     -- astern +, lateral, alt above deck
+  local p = carrier:getPosition()
+  -- p.x is the ship's forward axis, p.z its starboard axis. Both unit
+  -- vectors, so a dot product is the projection straight off.
+  local dx, dy, dz = u.x - c.x, u.y - c.y, u.z - c.z
+  local fwd = dx * p.x.x + dz * p.x.z      -- + ahead of the ship
+  local lat = dx * p.z.x + dz * p.z.z      -- + to starboard
+  return -fwd, lat, dy * FEET              -- astern +, starboard +, ft above deck
 end
 
 local function key(unit)

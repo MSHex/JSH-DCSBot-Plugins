@@ -155,8 +155,17 @@ neither MOOSE nor the FunkMan package — only `{X, Z, Alt, AoA}` plus
   Check the type before plotting, not after.
 - `Z` is relative to the **ship's axis**, and the plotter rotates by `-9°`
   for the angled deck. A well-lined-up approach therefore has `Z` growing
-  with distance astern; a `Z` of zero down the groove plots as ~860 ft of
-  lineup error at 1 NM. It looks wrong and is not.
+  with distance astern; a `Z` of zero down the groove is an aircraft flying
+  up the ship's *wake* and plots as ~950 ft of lineup error at 1 NM. It looks
+  wrong and is not.
+- **The AIRBOSS frame, checked against MOOSE's source rather than guessed.**
+  `Airboss.lua` `_GetDistances()` projects the carrier→player vector onto the
+  ship's own orientation axes, so `X`/`Z` are ship frame and `X` is
+  **negative** astern — but `Airboss.lua:19177` writes `local b = -groove.X`,
+  so the CSV column `trapsheet.py` reads is **positive** astern. `Z` is
+  written raw, starboard positive. Project onto the carrier's own `p.x` and
+  `p.z` rather than deriving a perpendicular by hand, and there is no second
+  derivation to get backwards.
 
 ## Foothold
 

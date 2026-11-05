@@ -60,7 +60,39 @@ matters.
 
 1. Every changed plugin's `version.py` bumped, two components.
 2. `python3 -I tests/test_plugin_packaging.py` — packaging rules.
-3. `python3 -I tests/lua_balance_check.py` — every injected Lua file.
-4. The plugin's own tests, including any that need PostgreSQL.
-5. Tag `vMAJOR.MINOR.PATCH` on `main`, with notes saying what to copy where
+3. `python3 -I tests/schema_check.py` — every config key is in its schema.
+4. `python3 -I tests/lua_balance_check.py` — every injected Lua file.
+5. The plugin's own tests, including any that need PostgreSQL.
+6. Tag `vMAJOR.MINOR.PATCH` on `main`, with notes saying what to copy where
    and whether a mission reload or DCS restart is needed.
+
+
+## Plugin layout
+
+DCSServerBot's own `plugins/sample` is the reference. Every plugin here
+carries:
+
+| | |
+| --- | --- |
+| `__init__.py` | exports the cog **and** `__version__` |
+| `version.py` | two components, as above |
+| `README.md` | becomes the plugin's page on the docs site; its first prose paragraph becomes the index summary |
+| `schemas/<name>_schema.yaml` | required for any plugin with a config |
+| `config/<name>.yaml` | the documented sample |
+| `db/tables.sql`, `db/update_v<x.y>.sql` | only if the plugin owns tables |
+
+### Schemas are not optional
+
+`core/plugin.py:450` validates a plugin's config against its schema on load,
+and with `validation: strict` in `main.yaml` a key missing from the schema
+**stops the plugin**. The same file also drives the 3.0.5.0 web admin GUI's
+config form and the documentation site's configuration reference, so a key
+with no schema entry is invisible in all three places.
+
+Every configurable leaf needs `desc` and `example`. A missing `desc` renders
+as a blank cell in the reference table; `tests/schema_check.py` catches both
+that and any config key the schema has drifted away from.
+
+`func: is_node` on the instance section is worth having for its own sake: it
+rejects a section named after a *server* rather than an instance, which
+otherwise silently does nothing at all.

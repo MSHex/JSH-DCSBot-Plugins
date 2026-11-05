@@ -1,0 +1,59 @@
+# jsh_statfix repairs one shared database rather than a DCS server, so unlike
+# the other JSH plugins it is configured under DEFAULT only -- there are no
+# per-instance sections, and the scheduler runs on the master node alone.
+type: map
+nullable: false
+mapping:
+  DEFAULT:
+    type: map
+    nullable: false
+    desc: Settings for the scheduled playtime repair. Master node only.
+    mapping:
+      enabled:
+        type: bool
+        nullable: false
+        desc: Whether the repair runs on its schedule. The slash commands work either way.
+        example: "true"
+      interval_days:
+        type: int
+        nullable: false
+        range: {min: 1}
+        desc: >-
+          Days between runs, measured from the last successful run recorded in
+          jsh_statfix_runs rather than from process uptime, so a bot that
+          restarts often still reaches the interval.
+        example: "30"
+      dry_run:
+        type: bool
+        nullable: false
+        desc: >-
+          When true, a scheduled run reports what it would change and writes
+          nothing. Worth leaving on for the first month.
+        example: "false"
+      min_age_hours:
+        type: int
+        nullable: false
+        range: {min: 1}
+        desc: >-
+          Pass 1 only closes a session older than this. It is the rail that
+          keeps a pilot who is airborne right now from having their session
+          closed underneath them. Never set it below your longest mission.
+        example: "6"
+      grace_minutes:
+        type: int
+        nullable: false
+        range: {min: 0}
+        desc: >-
+          Pass 2 corrects a session to its pilot's last recorded event plus
+          this much, covering the flying after the last trackable event.
+        example: "15"
+      min_overlap_seconds:
+        type: int
+        nullable: false
+        range: {min: 0}
+        desc: >-
+          Pass 3 ignores an overlap smaller than this. DCSServerBot closes one
+          slot and opens the next from two separately-taken timestamps, so a
+          slot change routinely leaves them crossing by under a second; that is
+          not corruption. Only drop it to 0 for a one-off cleanup.
+        example: "60"

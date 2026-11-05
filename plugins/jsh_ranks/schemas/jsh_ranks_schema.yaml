@@ -1,0 +1,159 @@
+schema;badge:
+  type: map
+  nullable: false
+  desc: >-
+    Artwork shown as the /pilot status thumbnail. Same shape as
+    creditsystem.yaml's own badge, so a rank commented out of `achievements`
+    keeps its image by pasting the block across unchanged.
+  mapping:
+    name:
+      type: str
+      nullable: false
+      range: {min: 1}
+      desc: Badge name. Defaults to the rank name.
+      example: "General (O-10)"
+    img:
+      type: str
+      nullable: false
+      range: {min: 1}
+      desc: Image URL. Without one, /pilot status falls back to the earned rank's badge.
+      example: "https://upload.wikimedia.org/.../US-O10_insignia.svg.png"
+
+schema;granted_rank:
+  type: map
+  nullable: false
+  desc: One rank that cannot be earned and is handed out by /ranks grant.
+  mapping:
+    role:
+      type: str
+      nullable: false
+      range: {min: 1}
+      desc: >-
+        Discord role to assign, by name or numeric ID. Defaults to the rank
+        name. Leave the rank commented out of creditsystem.yaml's achievements
+        so CreditSystem never strips the role.
+      example: "General (O-10)"
+    level:
+      type: int
+      nullable: false
+      range: {min: 1, max: 20}
+      desc: >-
+        Foothold rank number. A granted-only rank is not on the ladder, so
+        rank_map cannot cover it. Must clear your highest ShopRankRequirements
+        entry if the holder should have the whole shop.
+      example: "19"
+    status:
+      type: str
+      nullable: false
+      range: {min: 1}
+      desc: >-
+        Short label shown by /pilot status in place of promotion progress,
+        since a granted rank has nothing to progress toward.
+      example: "Admin"
+    badge:
+      include: 'badge'
+
+schema;element_schema:
+  type: map
+  func: is_element
+  nullable: false
+  desc: Applies to every instance.
+  mapping:
+    enabled:
+      type: bool
+      nullable: false
+      desc: >-
+        Whether ranks are pushed to this server. Only meaningful on a Foothold
+        mission with RankingSystem = true in Foothold_Config.lua.
+      example: "true"
+    refresh_minutes:
+      type: int
+      nullable: false
+      range: {min: 0}
+      desc: >-
+        How often ranks are re-sent while people fly, since credits and
+        playtime move mid-session. 0 updates only on connect and slot change.
+      example: "5"
+    default_level:
+      type: int
+      nullable: false
+      range: {min: 1, max: 20}
+      desc: Level used for a pilot with no rank yet, and for any rank missing from rank_map.
+      example: "1"
+    rank_map:
+      type: map
+      nullable: false
+      desc: >-
+        Maps each creditsystem.yaml achievement `role`, written exactly as it
+        appears there, onto a Foothold rank number. A rank missing here falls
+        back to default_level, which looks like the rank doing nothing.
+      mapping:
+        regex;(.+):
+          type: int
+          nullable: false
+          range: {min: 1, max: 20}
+          desc: Foothold rank number for this Discord rank.
+          example: "12"
+    granted_ranks:
+      type: map
+      nullable: false
+      desc: Ranks that exist only to be granted by /ranks grant, keyed by rank name.
+      mapping:
+        regex;(.+):
+          type: any
+          nullable: false
+          desc: >-
+            Either a mapping (role, level, status, badge) or a bare integer,
+            which is shorthand for the level with the role named after the rank.
+          example: "20"
+    granted_status_format:
+      type: str
+      nullable: false
+      range: {min: 1}
+      desc: >-
+        Wording /pilot status shows for a granted rank. {status} is the rank's
+        own label and {rank} its name; both are optional. An unrecognised
+        placeholder falls back to the bare label rather than failing.
+      example: "🏆 {status} — outside the campaign ladder."
+    default_granted_status:
+      type: str
+      nullable: false
+      range: {min: 1}
+      desc: Label used by a granted rank that sets no `status` of its own.
+      example: "Granted rank"
+    level_names:
+      type: map
+      nullable: false
+      desc: >-
+        Optional display names per Foothold level. Only worth setting when
+        several Discord ranks share one level. Leave out to keep Foothold's own names.
+      mapping:
+        regex;(.+):
+          type: str
+          nullable: false
+          range: {min: 1}
+          desc: Name shown for this Foothold level.
+          example: "Officer"
+
+schema;instance_schema:
+  type: map
+  func: is_node
+  nullable: false
+  desc: Applies to one instance only.
+  mapping:
+    regex;(.+):
+      include: 'element_schema'
+
+type: map
+func: check_main_structure
+nullable: false
+mapping:
+  DEFAULT:
+    include: 'element_schema'
+  commands:
+    include: 'commands_schema'
+  regex;(.+):
+    type: any
+    func: any_of
+    nullable: false
+    enum: ['element_schema', 'instance_schema']

@@ -1,0 +1,132 @@
+schema;death_penalties:
+  type: map
+  nullable: false
+  desc: >-
+    Percentage of banked credits forfeited on death, keyed by how many deaths
+    the pilot has already taken this campaign. The highest listed key applies
+    from there on.
+  mapping:
+    regex;(\d+):
+      type: int
+      nullable: false
+      range: {min: 0, max: 100}
+      desc: Percentage of banked credits lost at this death count.
+      example: "50"
+
+schema;protection_zones:
+  type: map
+  nullable: false
+  desc: >-
+    Optional exact airbase name to CIRCULAR mission trigger-zone name. Overrides
+    the default land-base boundary only; never the coalition or ground checks.
+    Carrier protection always uses the ship-local deck footprint.
+  mapping:
+    regex;(.+):
+      type: str
+      nullable: false
+      range: {min: 1}
+      desc: Name of the circular trigger zone protecting this airbase.
+      example: "Hardcore_Kobuleti"
+
+schema;element_schema:
+  type: map
+  func: is_element
+  nullable: false
+  desc: Applies to every instance.
+  mapping:
+    enabled:
+      type: bool
+      nullable: false
+      desc: Whether the hardcore economy runs on this server.
+      example: "true"
+    buyin_fee:
+      type: int
+      nullable: false
+      range: {min: 0}
+      desc: Credits charged once to enrol in hardcore.
+      example: "500"
+    block_minutes:
+      type: int
+      nullable: false
+      range: {min: 1}
+      desc: Length of one payable block of flight time, in minutes.
+      example: "15"
+    normal_reward:
+      type: int
+      nullable: false
+      range: {min: 0}
+      desc: Credits per block for a pilot not enrolled in hardcore.
+      example: "25"
+    hardcore_reward:
+      type: number
+      nullable: false
+      range: {min: 0}
+      desc: Credits per block for an enrolled pilot. May be fractional.
+      example: "37.5"
+    death_penalties:
+      include: 'death_penalties'
+    dm_receipt:
+      type: bool
+      nullable: false
+      desc: Whether the pilot is sent a direct message receipt for each transaction.
+      example: "true"
+    support_roles:
+      type: seq
+      nullable: false
+      desc: >-
+        Special slots that earn normal_reward even for an enrolled pilot.
+        Observers and spectators are deliberately excluded.
+      sequence:
+        - {type: str, nullable: false, range: {min: 1}, desc: "A slot name.", example: "instructor"}
+    airfield_margin_m:
+      type: int
+      nullable: false
+      range: {min: 0}
+      desc: >-
+        Metres added to the runway and parking footprint when deciding whether
+        a pilot is inside a friendly airfield. Friendly means the facility's
+        current coalition matches the pilot's.
+      example: "75"
+    farp_radius_m:
+      type: int
+      nullable: false
+      range: {min: 0}
+      desc: Protection radius around a friendly FARP, in metres.
+      example: "150"
+    protection_zones:
+      include: 'protection_zones'
+    evidence_max_age_seconds:
+      type: int
+      nullable: false
+      range: {min: 0}
+      desc: How long a recorded damage event stays eligible to explain a later death.
+      example: "5"
+    incident_merge_seconds:
+      type: int
+      nullable: false
+      range: {min: 0}
+      desc: Events within this many seconds are treated as one incident rather than several.
+      example: "3"
+
+schema;instance_schema:
+  type: map
+  func: is_node
+  nullable: false
+  desc: Applies to one instance only.
+  mapping:
+    regex;(.+):
+      include: 'element_schema'
+
+type: map
+func: check_main_structure
+nullable: false
+mapping:
+  DEFAULT:
+    include: 'element_schema'
+  commands:
+    include: 'commands_schema'
+  regex;(.+):
+    type: any
+    func: any_of
+    nullable: false
+    enum: ['element_schema', 'instance_schema']

@@ -52,10 +52,28 @@ Both are covered by `tests/test_plugin_packaging.py`. Run it before tagging.
 
 ### Runtime traps
 
-- **8192-byte UDP limit.** `send_to_dcs` → `transport.sendto`; DCS reads with
-  `UDPRecvSocket:receive()` and **silently truncates**. Minify injected Lua and
-  check the datagram size. Only `do_script` is affected; `loadScript`/`dofile`
-  are not.
+- **8192-byte UDP limit, and it is DIRECTIONAL.** This bites only going
+  **bot → DCS**: `send_to_dcs` → `transport.sendto`, read by
+  `UDPRecvSocket:receive()` in `DCSServerBotMain.lua` with no size argument,
+  so LuaSocket's 8192-byte default applies and the rest is **silently
+  truncated**. Minify injected Lua and check the datagram before sending.
+
+  Three things this does *not* cover, each of which has already caused a
+  wrong conclusion:
+
+  - **It is per datagram, not a budget shared across plugins.** Each
+    injection is its own packet. The receive loop is `repeat … until err`,
+    draining the whole queue every simulation frame, against an OS buffer of
+    64 KB+. Three plugins injecting ~5 KB each at startup is not a problem.
+  - **Only `do_script` travels this way.** Lua shipped as files under
+    `Scripts/net/DCSServerBot/<plugin>/` is read by `loadfile()` in
+    `loadPlugin()` and has no size limit at all. `hardcore`'s `mission.lua`
+    is ~11 KB and perfectly fine. Only `jsh_credits`, `jsh_ranks` and
+    `jsh_trapsheet` inject.
+  - **DCS → bot has no such limit.** `dcsbot.sendBotTable` chunks at
+    `MAX_CHUNK = 65000` (`DCSServerBot.lua:14`) and the bot reassembles in
+    `services/servicebus/service.py:1110` with `SO_RCVBUF` at 2 MB. Sending a
+    few hundred samples up is never at risk.
 - **`server.status` is unreliable inside `registerDCSServer`.** The mission
   plugin sets it inside *its own* handler, and listener order across plugins
   is not guaranteed, so `server.status in (RUNNING, PAUSED)` there is always
@@ -113,6 +131,32 @@ That is not corruption. Don't rewrite it.
 - **`net.json2lua` does not exist in the mission environment.**
 - `MARK_ADDED` (25) and `MARK_CHANGE` (26) both fire when text is typed into a
   new mark. Remember the `idx` or you act twice.
+- **`S_EVENT_LANDING_QUALITY_MARK` only fires on Super Carrier decks.** No LSO
+  grade exists on a Stennis, Kuznetsov or Tarawa without MOOSE — that is a DCS
+  limit, not something a plugin can route around.
+- **There is no `getAoA()`.** Compute it as the angle between `getVelocity()`
+  and the longitudinal axis from `getPosition()`'s orthonormal basis, in the
+  pitch plane. That is geometric AoA in **degrees**; the Hornet's indexer
+  units track degrees closely and nobody else's do.
+
+## greenieboard's trapsheet plotter
+
+`plugins/greenieboard/trapsheet.py` draws the FunkMan picture and needs
+neither MOOSE nor the FunkMan package — only `{X, Z, Alt, AoA}` plus
+`aircraft`, `callsign`, `time`. Two traps, both found by running it:
+
+- **The AoA panel keys off the FILENAME, not `pinfo['aircraft']`.** It does
+  `ps = Path(trapfile).stem` and substring-matches raw DCS codes (`FA-18`,
+  `EA-18`, `T-45`, `F-14A-135-GR`, `F-14B`, `AV8BNA`, `A-4E-C`) to pick the
+  on-speed band. `jsh_trapsheet` passes a synthetic AIRBOSS-shaped name;
+  nothing is ever opened.
+- **There is no `else` branch.** An airframe matching none of those leaves
+  `xmax` unbound and raises `UnboundLocalError` partway through drawing.
+  Check the type before plotting, not after.
+- `Z` is relative to the **ship's axis**, and the plotter rotates by `-9°`
+  for the angled deck. A well-lined-up approach therefore has `Z` growing
+  with distance astern; a `Z` of zero down the groove plots as ~860 ft of
+  lineup error at 1 NM. It looks wrong and is not.
 
 ## Foothold
 
@@ -137,6 +181,7 @@ That is not corruption. Don't rewrite it.
 | Plugin | What it does |
 | --- | --- |
 | `jsh_credits` | Credits for landings, kills, CSAR and AAR |
+| `jsh_trapsheet` | FunkMan-style trapsheets with no MOOSE; Super Carrier decks only |
 | `jsh_ranks` | Bridges the Discord rank ladder to Foothold's; granted ranks; `cbuy:` |
 | `rankstatus` | `/pilot status`. Reads other plugins' configs, has none of its own |
 | `jsh_statfix` | Monthly playtime repair (see above) |

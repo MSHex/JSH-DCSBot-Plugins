@@ -80,6 +80,21 @@ numbers it reports are what a real run would do, not an estimate.
 Leaving `dry_run: true` for the first month is worth it: `/statfix status` then
 shows what it *would* have done, with nothing written.
 
+## The bot's own slot-change artefact
+
+DCSServerBot closes a session at `GREATEST(hop_on + 1 second, now())`, so an
+instant slot change leaves the *next* session's `hop_on` a few milliseconds
+after this one's `hop_on` — and about a second **before** this one's
+`hop_off`. Every slot change therefore produces a ~1-second overlap, by the
+bot's own design. It is not corruption and must never be rewritten.
+
+Two things keep the clip pass off them: `min_overlap_seconds`, and a guard
+requiring the clip to actually *shorten* the session. The second matters
+because the one-off cleanup is run with the threshold dropped to zero, where
+nothing else protects the pass — without it the clip writes the value already
+stored, the row stays in the overlap set, and it is rewritten on every run
+forever. On JSH that was **3,860 rows for 0.0 hours**, every run.
+
 ## A note on the minimum session length
 
 Every pass floors a corrected `hop_off` at `hop_on + 1 second`, matching

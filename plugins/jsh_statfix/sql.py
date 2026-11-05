@@ -111,6 +111,15 @@ CLIP_OVERLAPS = """
            AND nxt.next_hop_on IS NOT NULL
            AND nxt.next_hop_on < s.hop_off
            AND s.hop_off - nxt.next_hop_on > %(min_overlap)s::interval
+           -- Only ever SHORTEN. Without this the pass rewrites a row with the
+           -- value already in it, forever: DCSServerBot's stop_player closes a
+           -- session at GREATEST(hop_on + 1 second, now()), so an instant slot
+           -- change leaves the next hop_on a few milliseconds after this
+           -- hop_on and about a second BEFORE this hop_off. The floor then
+           -- wins over next_hop_on and the clip is a no-op that still matches
+           -- the WHERE. On JSH that was 3,860 rows re-written for 0.0 hours.
+           AND GREATEST(nxt.next_hop_on,
+                        s.hop_on + INTERVAL '1 second') < s.hop_off
     )
     UPDATE statistics s
        SET hop_off = c.new_hop_off
@@ -155,7 +164,9 @@ PREVIEW = """
              WHERE n.player_ucid = s.player_ucid AND n.hop_on > s.hop_on) nxt
         WHERE s.hop_off IS NOT NULL AND nxt.next_hop_on IS NOT NULL
           AND nxt.next_hop_on < s.hop_off
-          AND s.hop_off - nxt.next_hop_on > %(min_overlap)s::interval)        AS overlapping
+          AND s.hop_off - nxt.next_hop_on > %(min_overlap)s::interval
+          AND GREATEST(nxt.next_hop_on,
+                       s.hop_on + INTERVAL '1 second') < s.hop_off)           AS overlapping
 """
 
 #: Due-ness is measured from the last successful run in the table, never from

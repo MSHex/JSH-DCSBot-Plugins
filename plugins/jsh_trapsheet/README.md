@@ -32,20 +32,23 @@ dependency — matplotlib and numpy are already there for greenieboard.
 
 ## What you get, and where
 
-| Deck | Trajectory plot | LSO grade |
-| --- | --- | --- |
-| Super Carrier (Lincoln, Washington, Roosevelt, Forrestal…) | yes | yes |
-| Legacy (Stennis, Kuznetsov, Tarawa…) | yes | **no** |
+**Super Carrier decks only.** `S_EVENT_LANDING_QUALITY_MARK` only fires on
+Super Carrier modules — that is DCS's limit, not ours, and greenieboard's own
+README says the same. A pass on a legacy deck could never be graded, so it
+would be an ungraded picture cluttering the board.
 
-The grade limit is DCS's, not ours: `S_EVENT_LANDING_QUALITY_MARK` only fires
-on Super Carrier modules. greenieboard's own README says the same. A pass on
-a legacy deck is held for `grade_wait` seconds and then stored with its
-picture and an **empty** grade.
+Rather than sample a legacy deck and throw the result away, the mission
+filters before it samples: `carrier_types` is a list of deck type-name
+**prefixes**, defaulting to `CVN_`, `CV_59` and `Forrestal`. A Stennis or a
+Kuznetsov therefore costs no sampling work and sends no datagrams at all.
 
-Empty, deliberately — never `--`. A `--` is a real LSO no-grade, and writing
-it for a deck that simply cannot grade would quietly drag everyone's
-greenieboard average down with passes nobody flew badly. An empty grade
-matches no bucket in any greenieboard report and leaves `points` NULL.
+Prefixes, not exact names, because the Super Carrier hulls are numbered one
+by one — `CVN_71`, `CVN_72`, `CVN_73`, `CVN_75` — and an exact-name list
+would match nothing on a real server.
+
+If a finished pass gets no grade within `grade_wait`, it is **discarded**,
+not plotted. On a Super Carrier deck that only happens when the grade was
+genuinely lost, such as a disconnect mid-pass.
 
 Rows go into greenieboard's own `traps` table, so `/greenieboard` and
 `/traps` show these passes with their trapsheet. There is no second board.

@@ -75,6 +75,29 @@ check("a callsign with punctuation cannot break the filename",
       '/' not in sheet.trapfile_name('FA-18C_hornet', 'Dagger 1-1 | Joker')
       and '|' not in sheet.trapfile_name('FA-18C_hornet', 'Dagger 1-1 | Joker'))
 
+# ------------------------------------------------------------- deck filter
+# Prefixes, not exact names: the Super Carrier hulls are numbered one by one,
+# so an exact-name list would match nothing on a real server. This is the
+# same mistake the CA slot names cost us once already.
+def sampled(typename: str) -> bool:
+    return any(typename.startswith(p) for p in sheet.DEFAULT_DECKS)
+
+
+for hull in ['CVN_71', 'CVN_72', 'CVN_73', 'CVN_75', 'CV_59', 'Forrestal']:
+    check(f"{hull} is sampled", sampled(hull),
+          "a Super Carrier hull that is not sampled gets no trapsheet at all")
+
+for hull in ['Stennis', 'KUZNECOW', 'LHA_Tarawa', 'CVN']:
+    check(f"{hull} is not sampled", not sampled(hull),
+          "only Super Carrier decks raise S_EVENT_LANDING_QUALITY_MARK, so a "
+          "pass here could never be graded")
+
+eq("the deck list renders as a Lua table",
+   sheet.lua_list(('CVN_', 'CV_59')), '{"CVN_","CV_59"}')
+eq("an empty deck list is still valid Lua", sheet.lua_list([]), '{}')
+check("a quote in a deck name cannot break out of the literal",
+      sheet.lua_list(['a"b']) == '{"a\\"b"}')
+
 # ------------------------------------------------------------------- arrays
 pts = [[1852.0, 10.0, 400.0, 8.1], [926.0, 5.0, 200.0, 7.9], [0.0, 0.0, 0.0, 8.4]]
 ts = sheet.to_trapsheet(pts)

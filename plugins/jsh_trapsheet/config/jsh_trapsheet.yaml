@@ -10,9 +10,17 @@ DEFAULT:
   capture_ceiling_ft: 1500
   # Hard cap per pass, so a long go-around cannot grow without bound.
   max_points: 600
-  # How long to hold a finished pass waiting for the LSO grade. DCS only
-  # raises S_EVENT_LANDING_QUALITY_MARK on Super Carrier decks, so on a legacy
-  # deck this elapses and the pass is plotted without a grade.
+  # Deck types to sample, matched as PREFIXES. Only Super Carrier decks raise
+  # S_EVENT_LANDING_QUALITY_MARK, so a pass anywhere else could never be
+  # graded. Filtering mission-side means a legacy deck costs no sampling work
+  # and sends nothing. Add a legacy hull here only if you want ungraded plots.
+  carrier_types:
+    - CVN_
+    - CV_59
+    - Forrestal
+  # Seconds to hold a finished pass waiting for its LSO grade. If none
+  # arrives the pass is DISCARDED, not plotted -- it only happens when the
+  # grade was genuinely lost, such as a disconnect mid-pass.
   grade_wait: 20
   axes:
     # Flip if the plotted approach comes out mirrored. Which way is 'astern'

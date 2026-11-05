@@ -18,19 +18,35 @@ JT.cfg = JT.cfg or {
   range     = 2778,    -- start sampling within this many metres (1.5 NM)
   ceiling   = 1500,    -- ... and below this altitude above the deck, in feet
   maxpoints = 600,     -- hard cap per pass, so a go-around cannot grow forever
+  -- Deck type names to sample, matched as PREFIXES. Only Super Carrier decks
+  -- raise S_EVENT_LANDING_QUALITY_MARK, so a pass anywhere else could never
+  -- be graded. Filtering here rather than discarding later means a legacy
+  -- deck costs no sampling work and sends no datagrams at all.
+  decks     = { 'CVN_', 'CV_59', 'Forrestal' },
 }
 JT.tracks = JT.tracks or {}   -- [unitName] = {carrier=, name=, type=, pts={}}
 
 local FEET = 3.28084
 
--- Carrier units we will track against. A deck is anything with the
--- Carrier attribute, which covers Super Carrier and legacy decks alike.
+-- Decks we sample against: a carrier whose type matches one of cfg.decks.
+--
+-- Matched as a PREFIX, because the Super Carrier types are numbered per hull
+-- (CVN_71, CVN_72, CVN_73, CVN_75) and an exact-name list would match none of
+-- them on a real server.
+local function wanted(typename)
+  for _, p in ipairs(JT.cfg.decks or {}) do
+    if typename:sub(1, #p) == p then return true end
+  end
+  return false
+end
+
 local function carriers()
   local found = {}
   for _, side in pairs({coalition.side.BLUE, coalition.side.RED}) do
     for _, grp in pairs(coalition.getGroups(side, Group.Category.SHIP) or {}) do
       for _, u in pairs(grp:getUnits() or {}) do
-        if u:isExist() and u:hasAttribute('AircraftCarrier') then
+        if u:isExist() and u:hasAttribute('AircraftCarrier')
+           and wanted(u:getTypeName()) then
           found[#found + 1] = u
         end
       end

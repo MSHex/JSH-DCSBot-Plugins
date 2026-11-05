@@ -78,16 +78,19 @@ class TrapSheetEventListener(EventListener["TrapSheet"]):
         self._spawn(self._expire(server, key, grace))
 
     async def _expire(self, server: Server, key: tuple[str, str], grace: float) -> None:
-        """Flush a pass that never got an LSO grade -- a legacy deck."""
+        """
+        Drop a pass that never got an LSO grade.
+
+        Nothing is plotted or stored. An ungraded pass is clutter on the
+        greenieboard, and the mission only samples Super Carrier decks
+        anyway, so reaching here means the grade was genuinely lost -- the
+        player disconnected mid-pass, or DCS raised no quality mark. The
+        timer exists so `pending` cannot grow without bound.
+        """
         await asyncio.sleep(grace)
-        pass_ = self.pending.pop(key, None)
-        if pass_ is None:
-            return   # the grade arrived and took it
-        player = server.get_player(name=key[1])
-        if player:
-            self.log.debug(f"JSH TrapSheet: no LSO grade for {key[1]} within {grace}s; "
-                           f"plotting without one (legacy deck?)")
-            await self.plugin.store(server, player, pass_, grade=None, comment='')
+        if self.pending.pop(key, None) is not None:
+            self.log.debug(f"JSH TrapSheet: no LSO grade for {key[1]} within "
+                           f"{grace}s; discarding the pass.")
 
     # ----------------------------------------------------------------- grade
     @event(name="onMissionEvent")
@@ -111,5 +114,12 @@ class TrapSheetEventListener(EventListener["TrapSheet"]):
             return
 
         comment = data.get('comment', '') or ''
-        await self.plugin.store(server, player, pass_,
-                                grade=sheet.grade_of(comment), comment=comment)
+        grade = sheet.grade_of(comment)
+        if grade is None:
+            # Graded by DCS but unparseable. Rare, and worth saying out loud
+            # rather than silently filing a blank: it means the LSO comment
+            # format has changed under us.
+            self.log.warning(f"JSH TrapSheet: could not read a grade out of "
+                             f"{comment!r} for {player.name}; storing the pass "
+                             f"without one.")
+        await self.plugin.store(server, player, pass_, grade=grade, comment=comment)

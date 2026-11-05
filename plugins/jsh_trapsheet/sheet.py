@@ -32,6 +32,28 @@ AIRCRAFT = {
     'EA-18G': 'E/A-18G',
 }
 
+#: Deck type-name PREFIXES the mission samples against.
+#:
+#: Only Super Carrier decks raise S_EVENT_LANDING_QUALITY_MARK, so a pass
+#: anywhere else could never be graded and would be clutter on the board.
+#: Filtering mission-side means a legacy deck costs no sampling work and
+#: sends no datagrams at all, rather than being discarded after the fact.
+#:
+#: Prefixes, not exact names: the Super Carrier hulls are numbered
+#: individually (CVN_71, CVN_72, CVN_73, CVN_75) and an exact-name list would
+#: match none of them on a real server.
+DEFAULT_DECKS = ('CVN_', 'CV_59', 'Forrestal')
+
+
+def lua_list(values) -> str:
+    """A Lua table literal of strings, for injection into the sampler."""
+    out = []
+    for v in values or ():
+        s = str(v).replace('\\', '\\\\').replace('"', '\\"')
+        out.append(f'"{s}"')
+    return '{' + ','.join(out) + '}'
+
+
 #: The AoA panel of greenieboard's plotter picks its on-speed reference band
 #: by substring-matching the TRAPFILE NAME -- not pinfo['aircraft'] -- against
 #: these raw DCS codes (trapsheet.py:196-203, `ps = Path(trapfile).stem`).

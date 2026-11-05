@@ -65,6 +65,7 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
             self.log.error(f"JSH TrapSheet: could not read {path}: {ex}")
             return
 
+        decks = config.get('carrier_types') or sheet.DEFAULT_DECKS
         tuning = {
             'rate': float(config.get('sample_rate', 0.1)),
             'range': float(config.get('capture_range_nm', 1.5)) * 1852.0,
@@ -75,7 +76,8 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
             f"\njsh_trapsheet.cfg.rate={tuning['rate']!r} "
             f"jsh_trapsheet.cfg.range={tuning['range']!r} "
             f"jsh_trapsheet.cfg.ceiling={tuning['ceiling']!r} "
-            f"jsh_trapsheet.cfg.maxpoints={tuning['maxpoints']!r}")
+            f"jsh_trapsheet.cfg.maxpoints={tuning['maxpoints']!r} "
+            f"jsh_trapsheet.cfg.decks={sheet.lua_list(decks)}")
 
         message = {'command': 'do_script', 'script': script}
         size = len(json.dumps(message).encode()) + DATAGRAM_MARGIN

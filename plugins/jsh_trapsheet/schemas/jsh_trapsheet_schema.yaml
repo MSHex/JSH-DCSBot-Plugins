@@ -49,13 +49,28 @@ schema;jsh_trapsheet:
         Hard cap on samples per pass, so a long go-around inside the capture
         window cannot grow without bound.
       example: "600"
+    carrier_types:
+      type: seq
+      nullable: false
+      desc: >-
+        Deck type names to sample, matched as PREFIXES. Only Super Carrier
+        decks raise S_EVENT_LANDING_QUALITY_MARK, so a pass anywhere else
+        could never be graded; filtering here means a legacy deck costs no
+        sampling work and sends no datagrams. Prefixes because the Super
+        Carrier hulls are numbered individually (CVN_71, CVN_72...).
+      example: "CVN_"
+      sequence:
+        - type: str
+          nullable: false
+          desc: A deck type-name prefix, such as CVN_ or Forrestal.
+          example: "CVN_"
     grade_wait:
       type: float
       nullable: false
       desc: >-
-        Seconds to hold a finished pass waiting for the LSO grade. DCS only
-        raises S_EVENT_LANDING_QUALITY_MARK on Super Carrier decks, so on a
-        legacy deck this elapses and the pass is plotted without a grade.
+        Seconds to hold a finished pass waiting for its LSO grade. If none
+        arrives the pass is discarded rather than plotted, which only happens
+        when the grade was genuinely lost, such as a disconnect mid-pass.
       example: "20"
     night:
       type: bool

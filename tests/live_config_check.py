@@ -34,6 +34,32 @@ EXTERNAL_PARTIALS = {'commands_schema', 'chat_commands_schema'}
 #: Top-level keys that are never an instance section.
 NON_INSTANCE_SECTIONS = {'DEFAULT'}
 
+#: Subtrees a schema declares `type: any` because the value is genuinely
+#: polymorphic -- `granted_ranks` takes either a mapping or a bare integer,
+#: and a threat ring takes either a mapping or a bare radius. pykwalify
+#: accepts anything there, and so will the bot under `validation: strict`,
+#: which means a misspelled inner key passes validation and is then silently
+#: dropped by our own code: a rank quietly loses its badge or its Foothold
+#: level, and nothing is logged. The schema cannot catch that without giving
+#: up the polymorphism, so the key sets our code actually reads are declared
+#: here instead, keyed by the path the walk reaches them at.
+#:
+#: Keep these in step with the code named beside each one.
+#: Keyed by the containing path, with instance sections stripped. Each entry
+#: is (keys the code reads, what reads them, nested mappings and their keys).
+ANY_SUBTREES = {
+    'granted_ranks': (
+        {'role', 'level', 'status', 'badge'},
+        'jsh_ranks/grants.py resolve_spec()',
+        {'badge': {'name', 'img'}},          # as_achievement(), badge shape
+    ),
+    'threat_rings/systems': (
+        {'radius', 'colour', 'color', 'label'},
+        'battlegroundbridge threat rings',
+        {},
+    ),
+}
+
 
 def partials(doc: dict) -> dict:
     return {k.split(';', 1)[1]: doc[k] for k in doc if k.startswith('schema;')}
@@ -59,21 +85,66 @@ def covers(mapping: dict, key: str):
     return None
 
 
-def walk(value, rule, parts: dict, path: str, found: list) -> None:
+def container_of(path: str) -> str:
+    """The path of the mapping an entry sits in, instance sections stripped.
+
+    `[DCS.Foothold]/granted_ranks/General (O-10)` -> `granted_ranks`
+    `[DEFAULT]/threat_rings/systems/Patriot`      -> `threat_rings/systems`
+    """
+    segs = [p for p in path.split('/') if p and not p.startswith('[')]
+    return '/'.join(segs[:-1])
+
+
+def check_any_subtree(value, path: str, found: list, stats: dict) -> None:
+    """Validate ONE entry of a `type: any` mapping against what our code reads.
+
+    `value` is the entry itself -- the rank's spec, or the threat ring's --
+    because the walk descends into it before finding no schema rule to apply.
+    """
+    entry = ANY_SUBTREES.get(container_of(path))
+    if entry is None:
+        stats['unvalidated'].append(path)
+        return
+    allowed_keys, owner, nested = entry
+    stats['any_checked'] += 1
+    if not isinstance(value, dict):
+        # A bare scalar: the documented shorthand. Nothing to check.
+        return
+    for key, child in value.items():
+        if key not in allowed_keys:
+            found.append(
+                f"{path}/{key}  -- not a key {owner} reads; the schema "
+                f"declares this subtree `type: any`, so the bot accepts it "
+                f"under strict validation and our code then ignores it")
+            continue
+        if key in nested and isinstance(child, dict):
+            for sub in child:
+                if sub not in nested[key]:
+                    found.append(
+                        f"{path}/{key}/{sub}  -- not a key {owner} reads")
+
+
+def walk(value, rule, parts: dict, path: str, found: list,
+         stats: dict | None = None) -> None:
     """Report any key in the live config that the schema cannot reach."""
+    stats = stats if stats is not None else {
+        'checked': 0, 'any_checked': 0, 'unvalidated': []}
     if not isinstance(value, dict):
         return
     resolved = resolve(rule, parts)
     mapping = resolved.get('mapping') if isinstance(resolved, dict) else None
     if mapping is None:
-        # A free-form or externally-supplied rule: nothing to check below here.
+        # `type: any` or an externally-supplied rule. The schema permits
+        # anything here, so this is where a typo survives validation.
+        check_any_subtree(value, path, found, stats)
         return
     for key, child in value.items():
         rule_for_key = covers(mapping, key)
         if rule_for_key is None:
             found.append(f"{path}/{key}  -- not in the schema")
             continue
-        walk(child, rule_for_key, parts, f"{path}/{key}", found)
+        stats['checked'] += 1
+        walk(child, rule_for_key, parts, f"{path}/{key}", found, stats)
 
 
 def known_names(config_dir: pathlib.Path) -> tuple[set, set]:
@@ -112,6 +183,7 @@ def main() -> int:
               f" section names cannot be checked\n")
 
     findings: dict[str, list[str]] = {}
+    coverage: dict[str, dict] = {}
     checked = 0
 
     for pkg in sorted(p for p in PLUGINS.iterdir() if p.is_dir()):
@@ -123,6 +195,7 @@ def main() -> int:
 
         checked += 1
         found: list[str] = []
+        stats = {'checked': 0, 'any_checked': 0, 'unvalidated': []}
         doc = yaml.safe_load(schema_file.read_text(encoding='utf-8')) or {}
         parts = partials(doc)
         element = (doc.get('mapping') or {}).get('DEFAULT')
@@ -143,24 +216,40 @@ def main() -> int:
                     f"[{section}]  -- not a node or instance name in nodes.yaml")
                 continue
             if element is not None:
-                walk(body, element, parts, f"[{section}]", found)
+                walk(body, element, parts, f"[{section}]", found, stats)
 
         if found:
             findings[name] = found
+        coverage[name] = stats
 
-    for name in sorted(findings):
-        print(f"{name}.yaml")
-        for line in findings[name]:
-            print(f"    {line}")
-        print()
+    print(f"{'plugin':22s} {'keys':>5s} {'any':>4s}  unvalidated")
+    for name in sorted(coverage):
+        s = coverage[name]
+        print(f"{name:22s} {s['checked']:5d} {s['any_checked']:4d}  "
+              f"{len(s['unvalidated']) or ''}")
+        for p in s['unvalidated'][:3]:
+            print(f"{'':22s}       ?  {p}")
+    total_keys = sum(s['checked'] for s in coverage.values())
+    unvalidated = sum(len(s['unvalidated']) for s in coverage.values())
+    print(f"\n{checked} live config(s), {total_keys} key(s) validated against "
+          f"the schemas")
 
-    live_present = sorted(p.stem for p in plugin_dir.glob('*.yaml')
-                          if (PLUGINS / p.stem / 'schemas' / f'{p.stem}_schema.yaml').exists())
-    print(f"checked {checked} of our plugins with a live config"
-          f"{': ' + ', '.join(live_present) if live_present else ''}")
     if findings:
+        print()
+        for name in sorted(findings):
+            print(f"{name}.yaml")
+            for line in findings[name]:
+                print(f"    {line}")
+            print()
         print(f"{sum(len(v) for v in findings.values())} finding(s) in "
               f"{len(findings)} file(s) -- fix these before validation: strict")
+        return 1
+
+    if unvalidated:
+        print(f"no findings, but {unvalidated} subtree(s) marked ? above were "
+              f"not validated: the schema declares them `type: any` and no "
+              f"ANY_SUBTREES entry names the keys our code reads there. Add "
+              f"one, or accept that a typo inside them passes silently.")
         return 1
     print("no findings; these configs will survive validation: strict")
     return 0

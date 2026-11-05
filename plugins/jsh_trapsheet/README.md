@@ -60,8 +60,8 @@ Rows go into greenieboard's own `traps` table, so `/greenieboard` and
 inside the capture window records four numbers: distance astern, lateral
 offset, height above the deck, and AoA. When the pass ends — touchdown,
 crash, or simply leaving the window — the samples are sent up as
-`jshTrapsheet`. The listener holds them until the LSO grade arrives, or until
-`grade_wait` elapses.
+`jshTrapsheet`. The listener holds them until the LSO grade arrives, or
+discards them if `grade_wait` elapses first.
 
 ### Angle of attack
 
@@ -132,7 +132,8 @@ See `config/jsh_trapsheet.yaml`. Sections key on the **instance** name from
 | `capture_range_nm` | `1.5` | Start sampling inside this range of the deck |
 | `capture_ceiling_ft` | `1500` | Only sample below this height above the deck |
 | `max_points` | `600` | Cap per pass, so a go-around cannot grow unbounded |
-| `grade_wait` | `20` | Seconds to wait for an LSO grade before plotting without one |
+| `carrier_types` | `CVN_`, `CV_59`, `Forrestal` | Deck type-name **prefixes** to sample |
+| `grade_wait` | `20` | Seconds to wait for an LSO grade before discarding the pass |
 | `night` | `false` | Record passes as night traps |
 | `axes.invert_x` | `false` | Flip if the approach plots back to front |
 | `axes.invert_z` | `false` | Flip if lineup is mirrored left for right |

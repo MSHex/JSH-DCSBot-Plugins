@@ -54,6 +54,30 @@ INSERT INTO statistics VALUES (2,'toby','AH-64D_BLK_II','2026-09-16 19:00',NULL,
 -- "range lower bound must be less than or equal to range upper bound".
 INSERT INTO missions VALUES (4,'JSH Co-op','2026-09-16 18:00','2026-09-16 20:00:00');
 INSERT INTO statistics VALUES (4,'joker','UH-1H','2026-09-16 20:14:43',NULL,0,0,0);
+-- THE 1-MINUTE FLOOR BUG: a session SHORTER than a minute, followed straight
+-- away by the next slot. jsh_statfix 1.0/1.1 floored hop_off at hop_on + 1
+-- MINUTE, which pushed it past the next session's start -- so the repair
+-- created the overlap it exists to remove, re-clipped it every run without
+-- converging, and inflated the session to a minute it never flew. 3,606 rows
+-- and 60 hours of phantom time on the live database.
+INSERT INTO missions VALUES (5,'JSH Co-op','2026-10-20 18:00','2026-10-20 23:00');
+INSERT INTO statistics VALUES (5,'toby','F-16C_50','2026-10-20 20:00:00','2026-10-20 20:00:12',0,0,0);
+INSERT INTO statistics VALUES (5,'toby','A-10C_2', '2026-10-20 20:00:13','2026-10-20 21:00:00',1,1,0);
+-- THE LIVE PATHOLOGY, exactly: a SHORT session that the clip pass touches.
+-- hop_off sits at the mission end so pass 3 sees it overlapping the next slot
+-- taken 30 seconds later. With a 1-minute floor the clip writes hop_on + 60s,
+-- which is STILL past the next session's start -- so the row never leaves the
+-- overlap set, is rewritten every run, and carries 60 seconds it never flew.
+-- That is the 3,606 rows and 60 hours on the live database.
+INSERT INTO missions VALUES (7,'JSH Co-op','2026-10-22 18:00','2026-10-22 20:05:00');
+INSERT INTO statistics VALUES (7,'grif','F-16C_50','2026-10-22 20:00:00','2026-10-22 20:05:00',0,0,0);
+INSERT INTO statistics VALUES (7,'grif','A-10C_2', '2026-10-22 20:00:30','2026-10-22 21:00:00',1,1,0);
+-- SUB-SECOND SKEW: the bot closes one slot and opens the next from two
+-- separately-taken timestamps, so they cross by under a second. Not
+-- corruption; min_overlap must leave it alone.
+INSERT INTO missions VALUES (6,'JSH Co-op','2026-10-21 18:00','2026-10-21 23:00');
+INSERT INTO statistics VALUES (6,'joker','F-16C_50','2026-10-21 20:00:00','2026-10-21 20:30:00.995',0,0,0);
+INSERT INTO statistics VALUES (6,'joker','UH-1H',   '2026-10-21 20:30:00','2026-10-21 21:00:00',1,1,0);
 -- A LIVE session: open, started minutes ago. Must survive untouched.
 INSERT INTO missions VALUES (3,'JSH Foothold Alpha', now() AT TIME ZONE 'utc' - INTERVAL '2 hours', NULL);
 INSERT INTO statistics VALUES (3,'live','FA-18C_hornet',
@@ -107,7 +131,8 @@ for name in ['CLOSE_ORPHANS', 'CORRECT_BY_EVENTS', 'CLIP_OVERLAPS', 'TOTAL_HOURS
     stmt = getattr(S, name)
     if name in ('LAST_RUN', 'RECENT_RUNS', 'START_RUN', 'FINISH_RUN'):
         continue  # need jsh_statfix_runs; covered after it is created
-    body = bind(stmt, {'min_age': "'6 hours'", 'grace': "'15 minutes'"})
+    body = bind(stmt, {'min_age': "'6 hours'", 'grace': "'15 minutes'",
+                       'min_overlap': "'60 seconds'"})
     prep.append(f"PREPARE p_{name.lower()} AS {body};")
 run("\n".join(prep))
 checks.append(("every repair statement prepares", "ok", "ok", True))
@@ -121,10 +146,10 @@ checks.append(("run-log statements prepare against tables.sql", "ok", "ok", True
 
 before = run(f"COPY ({S.TOTAL_HOURS}) TO STDOUT").strip()
 # 323.18 (Toby's fortnight) + 327.17 (Joker's) + 2.75 (one real sortie)
-eq("hours before the repair", before, "653.10")  # the two orphans are still open here
+eq("hours before the repair", before, "656.18")  # the two orphans are still open here
 
-pre = run(f"COPY ({bind(S.PREVIEW, {'min_age': chr(39)+'6 hours'+chr(39)})}) TO STDOUT").strip()
-eq("preview counts orphans/machine-closed/overlapping", pre, "2\t2\t1")
+pre = run(f"COPY ({bind(S.PREVIEW, {'min_age': chr(39)+'6 hours'+chr(39), 'min_overlap': chr(39)+'60 seconds'+chr(39)})}) TO STDOUT").strip()
+eq("preview counts orphans/machine-closed/overlapping", pre, "2\t3\t2")
 
 eq("pass 1 closed both stale orphans",
    update(f"{bind(S.CLOSE_ORPHANS, {'min_age': chr(39)+'6 hours'+chr(39)})};"), 2)
@@ -133,18 +158,46 @@ eq("pass 1 closed both stale orphans",
 eq("a mission ending BEFORE a session started never reverses it",
    run("""COPY (SELECT count(*) FROM statistics
           WHERE hop_off IS NOT NULL AND hop_off < hop_on) TO STDOUT""").strip(), "0")
-eq("that session gets a minimum length instead",
+# One SECOND, matching DCSServerBot's own floor -- a minute was the bug.
+eq("an unrecoverable session gets the minimum length, not a minute",
    run("""COPY (SELECT hop_off FROM statistics
-          WHERE player_ucid='joker' AND slot='UH-1H') TO STDOUT""").strip(),
-   "2026-09-16 20:15:43")
+          WHERE player_ucid='joker' AND slot='UH-1H' AND mission_id=4) TO STDOUT""").strip(),
+   "2026-09-16 20:14:44")
 
 eq("pass 2 corrected only the session with events",
    update(f"{bind(S.CORRECT_BY_EVENTS, {'grace': chr(39)+'15 minutes'+chr(39)})};"), 1)
 
-eq("pass 3 clipped the event-less instructor session",
-   update(f"{S.CLIP_OVERLAPS};"), 1)
+eq("pass 3 clipped the instructor session and the short one",
+   update(f"{bind(S.CLIP_OVERLAPS, {'min_overlap': chr(39)+'60 seconds'+chr(39)})};"), 2)
 
-eq("no overlaps remain", run(f"COPY ({S.OVERLAP_COUNT}) TO STDOUT").strip(), "0")
+# The floor must match DCSServerBot's own (one second), not stretch a short
+# session past the next one.
+eq("a 12-second session keeps its length, not a minute",
+   run("""COPY (SELECT hop_off FROM statistics
+          WHERE player_ucid='toby' AND slot='F-16C_50' AND mission_id=5) TO STDOUT""").strip(),
+   "2026-10-20 20:00:12")
+eq("and so does not overlap the slot taken one second later",
+   run("""COPY (SELECT count(*) FROM statistics a JOIN statistics b
+          ON a.player_ucid=b.player_ucid AND a.hop_on < b.hop_on
+         AND b.hop_on < a.hop_off WHERE a.mission_id=5) TO STDOUT""").strip(), "0")
+eq("a short clipped session ends where the next one starts, not a minute later",
+   run("""COPY (SELECT hop_off FROM statistics
+          WHERE player_ucid='grif' AND slot='F-16C_50' AND mission_id=7) TO STDOUT""").strip(),
+   "2026-10-22 20:00:30")
+eq("sub-second slot-change skew is left alone",
+   run("""COPY (SELECT hop_off FROM statistics
+          WHERE player_ucid='joker' AND slot='F-16C_50' AND mission_id=6) TO STDOUT""").strip(),
+   "2026-10-21 20:30:00.995")
+
+eq("no overlap above the threshold remains",
+   run("""COPY (SELECT count(*) FROM statistics a JOIN statistics b
+          ON a.player_ucid = b.player_ucid
+         AND (a.mission_id, a.slot, a.hop_on) < (b.mission_id, b.slot, b.hop_on)
+         AND a.hop_on < b.hop_off AND b.hop_on < a.hop_off
+        WHERE a.hop_off IS NOT NULL AND b.hop_off IS NOT NULL
+          AND a.hop_off - b.hop_on > INTERVAL '60 seconds') TO STDOUT""").strip(), "0")
+eq("the sub-second one is still there, deliberately",
+   run(f"COPY ({S.OVERLAP_COUNT}) TO STDOUT").strip(), "1")
 
 # The live session must be exactly as it was: still open.
 eq("the live session was not touched",
@@ -167,7 +220,8 @@ eq("every closed session can build a tsrange",
 
 eq("Toby's fortnight became a real sortie",
    run("""COPY (SELECT round(extract(epoch from (hop_off-hop_on))/3600.0,2)
-          FROM statistics WHERE player_ucid='toby' AND slot='F-16C_50') TO STDOUT""").strip(), "0.61")
+          FROM statistics WHERE player_ucid='toby' AND slot='F-16C_50'
+            AND mission_id=1) TO STDOUT""").strip(), "0.61")
 
 eq("Joker's event-less instructor session was clipped to his next slot",
    run("""COPY (SELECT round(extract(epoch from (hop_off-hop_on))/3600.0,2)
@@ -179,7 +233,7 @@ checks.append((f"hours after the repair: {before} -> {after}", after, after, Tru
 # Idempotence: a second run must be a no-op, or a monthly job drifts the data.
 again = [update(f"{bind(S.CLOSE_ORPHANS, {'min_age': chr(39)+'6 hours'+chr(39)})};"),
          update(f"{bind(S.CORRECT_BY_EVENTS, {'grace': chr(39)+'15 minutes'+chr(39)})};"),
-         update(f"{S.CLIP_OVERLAPS};")]
+         update(f"{bind(S.CLIP_OVERLAPS, {'min_overlap': chr(39)+'60 seconds'+chr(39)})};")]
 eq("running it again changes nothing (idempotent)", again, "[0, 0, 0]")
 
 for label, got, want, ok in checks:

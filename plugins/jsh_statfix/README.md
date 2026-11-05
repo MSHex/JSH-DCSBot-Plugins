@@ -46,7 +46,10 @@ Run in this order, in one transaction. Order matters.
 3. **Clip the overlaps.** One person has one DCS client and cannot occupy two
    slots at once, so a session running past the start of that pilot's next
    session is wrong by definition, and that next `hop_on` is a firm upper
-   bound. This needs no `missionstats`, is a strictly tighter bound than pass
+   bound. Overlaps below `min_overlap_seconds` are left alone: the bot closes
+   one slot and opens the next from two separately-taken timestamps, so a slot
+   change routinely leaves them crossing by under a second, and that is not
+   corruption. This needs no `missionstats`, is a strictly tighter bound than pass
    2, and catches what pass 2 is blind to: instructor and artillery-commander
    sessions, which generate no events because those slots shoot at nothing.
    Driving the overlap count to zero is the same operation seen from the other
@@ -76,6 +79,21 @@ numbers it reports are what a real run would do, not an estimate.
 
 Leaving `dry_run: true` for the first month is worth it: `/statfix status` then
 shows what it *would* have done, with nothing written.
+
+## A note on the minimum session length
+
+Every pass floors a corrected `hop_off` at `hop_on + 1 second`, matching
+DCSServerBot's own `stop_player` and `close_statistics`.
+
+Versions 1.0 and 1.1 used **one minute**, which was actively harmful rather
+than merely arbitrary. A session shorter than a minute was stretched past the
+start of the pilot's next one, so the repair *created* the overlap it exists to
+remove, re-clipped the same row on every run without ever converging, and
+credited each one a full minute it had not flown. On JSH that was 3,606 rows
+and 60 hours of phantom time — written by this plugin, not by the bot.
+
+`tests/statfix_sql_check.py` now carries that exact shape: a short session the
+clip pass touches, with the next slot taken 30 seconds later.
 
 ## What it does not do
 

@@ -58,20 +58,24 @@ class StatFix(Plugin):
         await super().cog_unload()
 
     # ---------------------------------------------------------------- config
-    def _settings(self) -> tuple[str, str, int]:
+    def _settings(self) -> tuple[str, str, str, int]:
         config = self.locals.get(DEFAULT_TAG, {})
         min_age = f"{max(1, int(config.get('min_age_hours', 6)))} hours"
         grace = f"{max(0, int(config.get('grace_minutes', 15)))} minutes"
+        # Below this, an overlap is two timestamps taken a moment apart at a
+        # slot change rather than corruption, and rewriting it is churn.
+        min_overlap = f"{max(0, int(config.get('min_overlap_seconds', 60)))} seconds"
         interval = max(1, int(config.get('interval_days', 30)))
-        return min_age, grace, interval
+        return min_age, grace, min_overlap, interval
 
     # ---------------------------------------------------------------- repair
     async def preview(self) -> dict:
         """What the next run would touch. Reads only."""
-        min_age, _, _ = self._settings()
+        min_age, _, min_overlap, _ = self._settings()
         async with self.apool.connection() as conn:
             async with conn.cursor(row_factory=dict_row) as cursor:
-                await cursor.execute(sql.PREVIEW, {'min_age': min_age})
+                await cursor.execute(sql.PREVIEW,
+                                     {'min_age': min_age, 'min_overlap': min_overlap})
                 counts = await cursor.fetchone()
                 await cursor.execute(sql.TOTAL_HOURS)
                 counts['hours'] = (await cursor.fetchone())['hours']
@@ -90,7 +94,7 @@ class StatFix(Plugin):
         A dry run does the work and then unwinds it, so the counts it reports
         are what a real run would do, not an estimate.
         """
-        min_age, grace, _ = self._settings()
+        min_age, grace, min_overlap, _ = self._settings()
         result = {'orphans_closed': 0, 'corrected_by_events': 0, 'overlaps_clipped': 0,
                   'hours_before': None, 'hours_after': None, 'dry_run': dry_run,
                   'skipped_events_pass': False, 'error': None}
@@ -118,7 +122,8 @@ class StatFix(Plugin):
                             # Not an error: pass 3 still does most of the work.
                             result['skipped_events_pass'] = True
 
-                        cursor = await conn.execute(sql.CLIP_OVERLAPS)
+                        cursor = await conn.execute(sql.CLIP_OVERLAPS,
+                                                    {'min_overlap': min_overlap})
                         result['overlaps_clipped'] = cursor.rowcount
 
                         cursor = await conn.execute(sql.TOTAL_HOURS)
@@ -150,7 +155,7 @@ class StatFix(Plugin):
     # ------------------------------------------------------------- scheduler
     @tasks.loop(hours=TICK_HOURS)
     async def schedule(self):
-        _, _, interval_days = self._settings()
+        _, _, _, interval_days = self._settings()
         async with self.apool.connection() as conn:
             cursor = await conn.execute(sql.LAST_RUN)
             last = (await cursor.fetchone())[0]
@@ -213,7 +218,7 @@ class StatFix(Plugin):
     @utils.app_has_roles(ADMIN_ROLES)
     async def status(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        _, _, interval_days = self._settings()
+        _, _, _, interval_days = self._settings()
         async with self.apool.connection() as conn:
             async with conn.cursor(row_factory=dict_row) as cursor:
                 await cursor.execute(sql.RECENT_RUNS, (8,))

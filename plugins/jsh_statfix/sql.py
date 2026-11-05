@@ -15,6 +15,14 @@ the bot is not something to point at that table.
 #: The age guard is the safety rail: a session opened minutes ago is somebody
 #: flying right now, and its hop_off is supposed to be NULL.
 #:
+#: The floor is one SECOND, matching DCSServerBot's own stop_player and
+#: close_statistics. jsh_statfix 1.0 and 1.1 used one MINUTE, which was worse
+#: than arbitrary: a session shorter than a minute was stretched past the start
+#: of the pilot's next one, so the repair CREATED the overlap it exists to
+#: remove, re-clipped it every run without converging, and inflated each such
+#: session to a full minute it had not flown. On JSH that was 3,606 rows and
+#: 60 hours of phantom time, all of it written by this plugin.
+#:
 #: The outer GREATEST is the OTHER guard, and shipping without it was a bug.
 #: close_all_statistics sets a mission's end to the NEXT mission's start minus
 #: one second, so a session that opened after that boundary has a hop_on LATER
@@ -29,8 +37,8 @@ CLOSE_ORPHANS = """
                    m.mission_end,
                    (SELECT MAX(s2.hop_off) FROM statistics s2
                      WHERE s2.mission_id = s.mission_id),
-                   s.hop_on + INTERVAL '1 minute'),
-               s.hop_on + INTERVAL '1 minute')
+                   s.hop_on + INTERVAL '1 second'),
+               s.hop_on + INTERVAL '1 second')
       FROM missions m
      WHERE m.id = s.mission_id
        AND s.hop_off IS NULL
@@ -48,7 +56,7 @@ CORRECT_BY_EVENTS = """
     WITH fix AS (
         SELECT s.mission_id, s.player_ucid, s.slot, s.hop_on,
                GREATEST(ev.last_event + %(grace)s::interval,
-                        s.hop_on + INTERVAL '1 minute') AS new_hop_off
+                        s.hop_on + INTERVAL '1 second') AS new_hop_off
           FROM statistics s
           JOIN missions m ON m.id = s.mission_id
           CROSS JOIN LATERAL (
@@ -77,6 +85,11 @@ CORRECT_BY_EVENTS = """
 #: start of that pilot's next session is wrong by definition and the next
 #: hop_on is a firm upper bound.
 #:
+#: `min_overlap` is what keeps this from churning: the bot closes a session and
+#: opens the next one from two separately-taken timestamps, so a slot change
+#: routinely leaves them crossing by under a second. That is not corruption and
+#: rewriting it every month is pure noise.
+#:
 #: Needs no missionstats, is a strictly tighter bound than CORRECT_BY_EVENTS,
 #: and catches the instructor and artillery-commander sessions that pass two is
 #: blind to -- those slots shoot at nothing, so they generate no events at all.
@@ -86,7 +99,7 @@ CLIP_OVERLAPS = """
     WITH clip AS (
         SELECT s.mission_id, s.player_ucid, s.slot, s.hop_on,
                GREATEST(nxt.next_hop_on,
-                        s.hop_on + INTERVAL '1 minute') AS new_hop_off
+                        s.hop_on + INTERVAL '1 second') AS new_hop_off
           FROM statistics s
           CROSS JOIN LATERAL (
               SELECT MIN(n.hop_on) AS next_hop_on
@@ -97,6 +110,7 @@ CLIP_OVERLAPS = """
          WHERE s.hop_off IS NOT NULL
            AND nxt.next_hop_on IS NOT NULL
            AND nxt.next_hop_on < s.hop_off
+           AND s.hop_off - nxt.next_hop_on > %(min_overlap)s::interval
     )
     UPDATE statistics s
        SET hop_off = c.new_hop_off
@@ -140,7 +154,8 @@ PREVIEW = """
             SELECT MIN(n.hop_on) AS next_hop_on FROM statistics n
              WHERE n.player_ucid = s.player_ucid AND n.hop_on > s.hop_on) nxt
         WHERE s.hop_off IS NOT NULL AND nxt.next_hop_on IS NOT NULL
-          AND nxt.next_hop_on < s.hop_off)                                    AS overlapping
+          AND nxt.next_hop_on < s.hop_off
+          AND s.hop_off - nxt.next_hop_on > %(min_overlap)s::interval)        AS overlapping
 """
 
 #: Due-ness is measured from the last successful run in the table, never from

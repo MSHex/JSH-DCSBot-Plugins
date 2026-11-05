@@ -1,0 +1,141 @@
+schema;points_per_kill:
+  type: seq
+  nullable: false
+  desc: Credits per kill, matched by unit category and type. First match wins.
+  sequence:
+    - type: map
+      nullable: false
+      mapping:
+        category: {type: str, nullable: false, desc: "DCS unit category, e.g. Planes, Helicopters, Ships, Air Defence.", example: "Planes"}
+        type: {type: str, nullable: false, enum: ['AI', 'Player'], desc: "Restrict to AI or human victims. Omit for both.", example: "AI"}
+        default: {type: int, nullable: false, range: {min: 0}, desc: "Fallback credits for anything not matched above.", example: "0"}
+        points: {type: int, nullable: false, range: {min: 0}, desc: "Credits awarded for this kind of kill.", example: "15"}
+
+schema;refuelling:
+  type: map
+  nullable: false
+  desc: >-
+    Credits for air-to-air refuelling. Measured by a fuel sampler in the
+    injected mission script, because DCS names the TANKER as the initiator of
+    S_EVENT_REFUELING and so the bot's own event cannot identify the receiver.
+  mapping:
+    enabled: {type: bool, nullable: false, desc: "Whether AAR is paid on this server.", example: "true"}
+    block_lbs: {type: int, nullable: false, range: {min: 1}, desc: "Size of one payable block of fuel, in pounds.", example: "1000"}
+    credits_per_block: {type: int, nullable: false, range: {min: 0}, desc: "Credits paid per completed block.", example: "5"}
+    minimum_lbs: {type: int, nullable: false, range: {min: 0}, desc: "Fuel below this in one sortie pays nothing, so a token contact earns nothing.", example: "500"}
+    max_lbs_per_sortie: {type: int, nullable: false, range: {min: 0}, desc: "Ceiling per sortie. 0 removes the cap; external tanks are paid for either way.", example: "0"}
+    label: {type: str, nullable: false, range: {min: 1}, desc: "Wording used in the ledger entry and the in-game message.", example: "refuelling"}
+
+schema;messages:
+  type: map
+  nullable: false
+  desc: >-
+    In-game message text. An empty string silences that one message.
+    Placeholders: {points}, {total}, {reason}, {kept}, {lost}, {old_points},
+    {new_points}, {place}.
+  mapping:
+    held: {type: str, nullable: false, desc: "Shown when credits are earned but held pending a safe landing.", example: "{points} credits held until you land."}
+    paid: {type: str, nullable: false, desc: "Shown on payout. Carries the balance either side, so it is worth a longer message_timeout.", example: "Paid {points} credits at {place}. Balance {new_points}."}
+    lost: {type: str, nullable: false, desc: "Shown when held credits are lost. {reason} is crash, eject, pilot_death, self_kill, disconnect or slot change.", example: "Lost {points} credits ({reason})."}
+    salvaged: {type: str, nullable: false, desc: "Shown when only part of the held credits survive.", example: "Kept {kept} of {points} credits ({reason})."}
+
+schema;partial_events:
+  type: map
+  nullable: false
+  desc: >-
+    What happens to held credits for each way a sortie can end. Each value is
+    a fraction kept, as a string, or a named policy.
+  mapping:
+    regex;(.+):
+      type: str
+      nullable: false
+      desc: Fraction of held credits kept when the sortie ends this way.
+      example: "0.5"
+
+schema;element_schema:
+  type: map
+  func: is_element
+  nullable: false
+  desc: Applies to every instance.
+  mapping:
+    enabled:
+      type: bool
+      nullable: false
+      desc: Whether this plugin pays credits on this server.
+      example: "true"
+    multiplier:
+      type: number
+      nullable: false
+      range: {min: 0}
+      desc: Applied once, at payout. Use it to pay double on one server without restating the rest.
+      example: "1.0"
+    death_payout:
+      type: number
+      nullable: false
+      range: {min: 0, max: 1}
+      desc: Fraction of held credits paid when the sortie ends in death rather than a landing.
+      example: "0.0"
+    partial_events:
+      include: 'partial_events'
+    default_partial_event:
+      type: str
+      nullable: false
+      desc: Policy used for an ending not listed in partial_events.
+      example: "0.0"
+    messages_enabled:
+      type: bool
+      nullable: false
+      desc: >-
+        False silences every in-game message on this instance at once, while
+        credits, payouts and the ledger carry on. Blanking keys under
+        `messages` silences them one at a time instead.
+      example: "true"
+    message_timeout:
+      type: int
+      nullable: false
+      range: {min: 1}
+      desc: >-
+        Seconds the in-game popup stays up. Leave it out to use the server's
+        own message_timeout. The chat copy stays for the session regardless.
+      example: "20"
+    messages:
+      include: 'messages'
+    remark_detail:
+      type: int
+      nullable: false
+      range: {min: 0}
+      desc: How much detail goes into the credits_log remark.
+      example: "1"
+    remark_max_length:
+      type: int
+      nullable: false
+      range: {min: 1}
+      desc: Remarks longer than this are truncated before being written.
+      example: "255"
+    refuelling:
+      include: 'refuelling'
+    points_per_kill:
+      include: 'points_per_kill'
+
+schema;instance_schema:
+  type: map
+  func: is_node
+  nullable: false
+  desc: Applies to one instance only.
+  mapping:
+    regex;(.+):
+      include: 'element_schema'
+
+type: map
+func: check_main_structure
+nullable: false
+mapping:
+  DEFAULT:
+    include: 'element_schema'
+  commands:
+    include: 'commands_schema'
+  regex;(.+):
+    type: any
+    func: any_of
+    nullable: false
+    enum: ['element_schema', 'instance_schema']

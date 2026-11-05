@@ -1,0 +1,152 @@
+schema;threat_rings:
+  type: map
+  nullable: false
+  desc: >-
+    Draws a range ring around anything whose title names a SAM system, for
+    both pilot-reported intel and imported mission labels. Rings follow a
+    marker that moves and vanish when its title stops naming a system.
+  mapping:
+    enabled: {type: bool, nullable: false, desc: "Whether rings are drawn at all.", example: "true"}
+    colour: {type: str, nullable: false, range: {min: 1}, desc: "Default ring colour as a hex string.", example: "#ff0000"}
+    label: {type: str, nullable: false, range: {min: 1}, desc: "Ring label. {name} is the matched system.", example: "{name} Range"}
+    skip_pattern:
+      type: str
+      nullable: false
+      desc: >-
+        Titles matching this never get a ring, so a marker already describing
+        a ring does not acquire one of its own.
+      example: '\b(range|ring|coverage|envelope|umbrella|mez|wez)\b'
+    systems:
+      type: map
+      nullable: false
+      desc: >-
+        Radius per system, in metres. Matching is case-insensitive and
+        tolerates SA-10, SA10 and SA 10; the longest designation wins, so
+        SA-10 is never matched as SA-1. Decimals are allowed.
+      mapping:
+        regex;(.+):
+          type: any
+          nullable: false
+          desc: >-
+            A number is a radius in metres using the colour and label above. A
+            mapping of radius, colour and label overrides them, which is how
+            friendly coverage is told apart from enemy threat.
+          example: "119265.836"
+
+schema;element_schema:
+  type: map
+  func: is_element
+  nullable: false
+  desc: Applies to every instance.
+  mapping:
+    enabled:
+      type: bool
+      nullable: false
+      desc: Whether the bridge runs for this server.
+      example: "true"
+    server_names:
+      type: seq
+      nullable: false
+      desc: >-
+        A second, separate gate: the DCS server names this bridge may write
+        for. Both this and `enabled` must pass, because a Battleground website
+        entry can carry a display alias that is not the DCS server name, and
+        the cost of getting it wrong is one server's intel on another's map.
+      sequence:
+        - {type: str, nullable: false, range: {min: 1}, desc: "A DCS server name from servers.yaml.", example: "JSH Dynamic Campaign"}
+    poll_seconds:
+      type: int
+      nullable: false
+      desc: Seconds between marker polls. Clamped to 3-60 whatever is written here.
+      example: "5"
+    import_drawings:
+      type: bool
+      nullable: false
+      desc: Whether mission drawings are imported onto the Battleground map.
+      example: "true"
+    debug:
+      type: bool
+      nullable: false
+      desc: >-
+        True logs a line per imported drawing, useful on first deploy and
+        noise afterwards since one mission can produce 60 or more. The one-line
+        summary is logged either way.
+      example: "false"
+    drawing_layers:
+      type: seq
+      nullable: false
+      desc: Mission Editor drawing layers to import from.
+      sequence:
+        - {type: str, nullable: false, range: {min: 1}, desc: "A drawing layer name.", example: "Common"}
+    unlabelled_pattern:
+      type: str
+      nullable: false
+      desc: >-
+        Drawings still carrying a name DCS generated are imported without a
+        label, because on a busy mission those strings cover the map and tell
+        a pilot nothing. The trailing (-\d+)* matches only the untouched
+        default shape, so anything a human typed keeps its name. Set to '' to
+        label everything.
+      example: '^(Polygon|Line|Label|Icon|TextBox)(-\d+)*$'
+    retain_intel_on_mission_change:
+      type: bool
+      nullable: false
+      desc: Whether pilot-reported intel survives a mission change.
+      example: "true"
+    intel_expiry_hours:
+      type: int
+      nullable: false
+      range: {min: 0}
+      desc: >-
+        0 disables expiry. When positive, measured from the last DCS-driven
+        change, so edits made on the website never extend a report's life.
+      example: "0"
+    threat_rings:
+      include: 'threat_rings'
+    commander_slots:
+      type: seq
+      nullable: false
+      desc: >-
+        Slots DCS gives no controllable unit for. A mark placed from one
+        carries no initiator, so the report is attributed to the single
+        commander on that coalition instead. Matched as PREFIXES, because DCS
+        numbers them per coalition (artillery_commander_blue_1).
+      sequence:
+        - {type: str, nullable: false, range: {min: 1}, desc: "A slot name prefix.", example: "artillery_commander"}
+    admin_roles:
+      type: seq
+      nullable: false
+      desc: Discord roles allowed to manage other players' reports.
+      sequence:
+        - {type: str, nullable: false, range: {min: 1}, desc: "A Discord role name.", example: "DCS Admin"}
+    admin_ucids:
+      type: seq
+      nullable: false
+      desc: >-
+        UCIDs allowed to manage other players' reports without a linked
+        Discord account. Real UCIDs must never be committed to a repository.
+      sequence:
+        - {type: str, nullable: false, range: {min: 1}, desc: "A DCS UCID.", example: "aabbccddeeff00112233445566778899"}
+
+schema;instance_schema:
+  type: map
+  func: is_node
+  nullable: false
+  desc: Applies to one instance only.
+  mapping:
+    regex;(.+):
+      include: 'element_schema'
+
+type: map
+func: check_main_structure
+nullable: false
+mapping:
+  DEFAULT:
+    include: 'element_schema'
+  commands:
+    include: 'commands_schema'
+  regex;(.+):
+    type: any
+    func: any_of
+    nullable: false
+    enum: ['element_schema', 'instance_schema']

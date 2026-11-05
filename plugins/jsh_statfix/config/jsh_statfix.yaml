@@ -36,3 +36,13 @@ DEFAULT:
   # much, to cover the flying after the last trackable event -- the taxi and
   # shutdown after a landing, for instance.
   grace_minutes: 15
+
+  # Pass 3 ignores an overlap smaller than this. The bot closes one slot and
+  # opens the next from two separately-taken timestamps, so a slot change
+  # routinely leaves them crossing by under a second. That is not corruption,
+  # and rewriting thousands of such rows every month is pure churn -- on JSH
+  # it was 255 of them.
+  #
+  # Pass 3 exists for sessions that overlap by HOURS, so this can be generous.
+  # 0 clips everything, which is what jsh_statfix 1.0 and 1.1 did.
+  min_overlap_seconds: 60

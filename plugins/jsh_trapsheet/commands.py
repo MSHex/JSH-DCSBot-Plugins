@@ -14,7 +14,7 @@ from datetime import datetime, timezone                  # noqa: E402
 from psycopg.types.json import Jsonb                     # noqa: E402
 from services.bot import DCSServerBot                    # noqa: E402
 
-from . import sheet                                      # noqa: E402
+from . import sheet, sql                                 # noqa: E402
 from .listener import TrapSheetEventListener             # noqa: E402
 
 #: do_script goes bot -> DCS, where UDPRecvSocket:receive() reads into a fixed
@@ -25,6 +25,10 @@ DATAGRAM_LIMIT = 8192
 DATAGRAM_MARGIN = 400
 
 RUNNING = [Status.RUNNING, Status.PAUSED]
+
+#: greenieboard writes its row on the same event; give it this long.
+ATTACH_TRIES = 6
+ATTACH_DELAY = 0.5
 
 
 def minify_lua(script: str) -> str:
@@ -161,35 +165,79 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
 
         tgroove = sheet.groove_time(points, float(config.get('sample_rate', 0.1)))
         wire = sheet.wire_of(comment)
-        night = bool(config.get('night', False))
+        trapdata = Jsonb({'points': points, 'source': 'jsh_trapsheet'})
 
-        async with self.apool.connection() as conn:
-            async with conn.transaction():
-                await conn.execute("""
-                    INSERT INTO traps (mission_id, player_ucid, unit_type, grade,
-                                       comment, place, trapcase, wire, night,
-                                       points, trapsheet, trapdata, tgroove)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (server.mission_id, player.ucid, unit_type,
-                      # An ungraded pass stores an EMPTY grade, never '--'.
-                      # '--' is a real LSO no-grade, and writing it for a
-                      # legacy deck that simply cannot grade would quietly
-                      # push everyone's greenieboard average down with passes
-                      # nobody actually flew badly. The column is NOT NULL, so
-                      # '' is the honest value: it matches no grade bucket in
-                      # any greenieboard report, and points stays NULL.
-                      grade or '', comment, pass_.get('carrier') or '',
-                      1, wire, night, sheet.points_of(grade),
-                      psycopg.Binary(image) if image else None,
-                      Jsonb({'points': points, 'source': 'jsh_trapsheet'}),
-                      tgroove))
+        if grade is None:
+            # Nothing to match greenieboard's row on, and inserting our own
+            # would risk the double row ATTACH exists to prevent. Post the
+            # picture, keep the database as greenieboard left it.
+            row = None
+        else:
+            row = await self._attach(server, player, grade, image, trapdata, tgroove)
+            if row is None:
+                row = await self._insert(server, player, unit_type, grade, comment,
+                                         pass_.get('carrier') or '', wire,
+                                         image, trapdata, tgroove)
 
-        self.log.info(f"JSH TrapSheet: stored a pass for {player.name} on "
-                      f"{server.name} ({len(points)} samples, "
-                      f"grade={grade or 'none'})")
+        self.log.info(f"JSH TrapSheet: {player.name} on {server.name}, "
+                      f"{len(points)} samples, grade={grade or 'none'}, "
+                      f"traps row={row if row is not None else 'none'}")
 
         await self.post(server, player, config, image, grade, comment,
                         pass_.get('carrier') or '', wire, tgroove)
+
+    async def _attach(self, server: Server, player: Player, grade: str,
+                      image: bytes | None, trapdata, tgroove) -> int | None:
+        """
+        Put the trapsheet on greenieboard's own row for this pass.
+
+        greenieboard reacts to the same LSO event and nothing orders the two
+        plugins, so its row may not be written yet. Retry for a few seconds
+        before concluding it never will be -- which is the case when FunkMan
+        is enabled in greenieboard.yaml and Super Carrier events are ignored.
+        """
+        params = {'image': psycopg.Binary(image) if image else None,
+                  'trapdata': trapdata, 'tgroove': tgroove,
+                  'ucid': player.ucid, 'mission_id': server.mission_id,
+                  'grade': grade, 'window': sql.WINDOW}
+        for attempt in range(ATTACH_TRIES):
+            async with self.apool.connection() as conn:
+                async with conn.transaction():
+                    cursor = await conn.execute(sql.ATTACH, params)
+                    found = await cursor.fetchone()
+            if found:
+                return found[0]
+            await asyncio.sleep(ATTACH_DELAY)
+        return None
+
+    async def _insert(self, server: Server, player: Player, unit_type: str,
+                      grade: str, comment: str, carrier: str, wire,
+                      image: bytes | None, trapdata, tgroove) -> int | None:
+        """
+        greenieboard wrote no row for this pass, so write one shaped like its.
+
+        Day or night is derived the way greenieboard derives it, from mission
+        time -- 20:00 to 06:00 is night, and night is CASE III.
+        """
+        mission = server.current_mission
+        night = False
+        if mission is not None:
+            try:
+                clock = (int(mission.start_time) + int(mission.mission_time)) % 86400
+                night = clock > 20 * 3600 or clock < 6 * 3600
+            except (TypeError, ValueError, AttributeError):
+                pass
+        async with self.apool.connection() as conn:
+            async with conn.transaction():
+                cursor = await conn.execute(sql.INSERT, {
+                    'mission_id': server.mission_id, 'ucid': player.ucid,
+                    'unit_type': unit_type, 'grade': grade, 'comment': comment,
+                    'place': carrier, 'case': 3 if night else 1, 'wire': wire,
+                    'night': night, 'points': sheet.points_of(grade),
+                    'image': psycopg.Binary(image) if image else None,
+                    'trapdata': trapdata, 'tgroove': tgroove})
+                found = await cursor.fetchone()
+        return found[0] if found else None
 
     # ------------------------------------------------------------------- post
     async def post(self, server: Server, player: Player, config: dict,

@@ -20,10 +20,10 @@ DEFAULT:
   # S_EVENT_LANDING_QUALITY_MARK, so a pass anywhere else could never be
   # graded. Filtering mission-side means a legacy deck costs no sampling work
   # and sends nothing. Add a legacy hull here only if you want ungraded plots.
+  # CVN_ covers CVN_71, CVN_72, CVN_73 and CVN_75. Forrestal is Heatblur's,
+  # not Super Carrier, and is left out until it is confirmed to be graded.
   carrier_types:
     - CVN_
-    - CV_59
-    - Forrestal
   # Seconds to hold a finished pass waiting for its LSO grade. If none
   # arrives the pass is DISCARDED, not plotted -- it only happens when the
   # grade was genuinely lost, such as a disconnect mid-pass.

@@ -82,11 +82,6 @@ schema;jsh_trapsheet:
         arrives the pass is discarded rather than plotted, which only happens
         when the grade was genuinely lost, such as a disconnect mid-pass.
       example: "20"
-    night:
-      type: bool
-      nullable: false
-      desc: Whether passes on this instance are recorded as night traps.
-      example: "false"
     axes:
       type: map
       nullable: false

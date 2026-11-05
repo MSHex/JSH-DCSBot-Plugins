@@ -42,7 +42,13 @@ AIRCRAFT = {
 #: Prefixes, not exact names: the Super Carrier hulls are numbered
 #: individually (CVN_71, CVN_72, CVN_73, CVN_75) and an exact-name list would
 #: match none of them on a real server.
-DEFAULT_DECKS = ('CVN_', 'CV_59', 'Forrestal')
+#: `CVN_` covers the four Super Carrier hulls -- CVN_71, CVN_72, CVN_73 and
+#: CVN_75, per AIRBOSS's CarrierType table. Nothing else is in by default.
+#: Forrestal is Heatblur's, not part of the Super Carrier module, and whether
+#: DCS grades it has not been confirmed; add it in config to find out. An
+#: ungraded pass is discarded, so the cost of trying is wasted sampling, not
+#: clutter.
+DEFAULT_DECKS = ('CVN_',)
 
 
 def lua_list(values) -> str:

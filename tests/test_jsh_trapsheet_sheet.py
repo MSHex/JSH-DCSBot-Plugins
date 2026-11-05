@@ -83,17 +83,22 @@ def sampled(typename: str) -> bool:
     return any(typename.startswith(p) for p in sheet.DEFAULT_DECKS)
 
 
-for hull in ['CVN_71', 'CVN_72', 'CVN_73', 'CVN_75', 'CV_59', 'Forrestal']:
+# The four Super Carrier hulls, by their AIRBOSS CarrierType type names.
+for hull in ['CVN_71', 'CVN_72', 'CVN_73', 'CVN_75']:
     check(f"{hull} is sampled", sampled(hull),
           "a Super Carrier hull that is not sampled gets no trapsheet at all")
 
-for hull in ['Stennis', 'KUZNECOW', 'LHA_Tarawa', 'CVN']:
+# Stennis and Enterprise are NOT Super Carrier; Forrestal is Heatblur's and
+# opt-in until it is confirmed to be graded. 'cvn-65' is lower case with a
+# hyphen, and must not slip through a careless prefix.
+for hull in ['Stennis', 'KUZNECOW', 'LHA_Tarawa', 'CVN', 'cvn-65',
+             'Forrestal', 'USS Enterprise 1966']:
     check(f"{hull} is not sampled", not sampled(hull),
           "only Super Carrier decks raise S_EVENT_LANDING_QUALITY_MARK, so a "
           "pass here could never be graded")
 
 eq("the deck list renders as a Lua table",
-   sheet.lua_list(('CVN_', 'CV_59')), '{"CVN_","CV_59"}')
+   sheet.lua_list(('CVN_', 'Forrestal')), '{"CVN_","Forrestal"}')
 eq("an empty deck list is still valid Lua", sheet.lua_list([]), '{}')
 check("a quote in a deck name cannot break out of the literal",
       sheet.lua_list(['a"b']) == '{"a\\"b"}')

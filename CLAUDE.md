@@ -81,6 +81,16 @@ Both are covered by `tests/test_plugin_packaging.py`. Run it before tagging.
 - **`asyncio.create_task` with no retained reference can be garbage-collected
   before it runs.** Keep a `_tasks` set with `add_done_callback(discard)`.
 
+### greenieboard owns the `traps` row
+
+greenieboard writes its own `traps` row for every Super Carrier
+`S_EVENT_LANDING_QUALITY_MARK` (unless FunkMan is enabled, when it ignores
+them). Anything else reacting to that event must **attach to that row, not
+insert another** — a second row puts the pass on the board twice. Nothing
+orders two plugins' handlers for one event, so the row may not exist yet:
+retry briefly before falling back. `traps.time` is UTC **without** a time
+zone; compare against `now() AT TIME ZONE 'utc'`, never a bare `now()`.
+
 ### Schema facts worth knowing
 
 - `players.discord_id` is `NOT NULL DEFAULT -1`, **not NULL**. Any query
@@ -134,10 +144,21 @@ That is not corruption. Don't rewrite it.
 - **`S_EVENT_LANDING_QUALITY_MARK` only fires on Super Carrier decks.** No LSO
   grade exists on a Stennis, Kuznetsov or Tarawa without MOOSE — that is a DCS
   limit, not something a plugin can route around.
-- **There is no `getAoA()`.** Compute it as the angle between `getVelocity()`
-  and the longitudinal axis from `getPosition()`'s orthonormal basis, in the
-  pitch plane. That is geometric AoA in **degrees**; the Hornet's indexer
-  units track degrees closely and nobody else's do.
+- **There is no `getAoA()`.** Compute it as MOOSE's `POSITIONABLE:GetAoA()`
+  does: **subtract `atmosphere.getWindWithTurbulence()` from `getVelocity()`
+  first** — AoA is against the air, not the ground — then take the angle to
+  the longitudinal axis from `getPosition()`'s basis, in the pitch plane. With
+  25–35 kt over a carrier deck, skipping the wind biases AoA by most of a
+  degree. It is in **degrees**; the Hornet's indexer units track degrees
+  closely and nobody else's do.
+- **A ship's origin is at the waterline.** Height above a carrier's
+  `getPoint()` is ~20 m too high for anything on or over the deck. AIRBOSS
+  uses `altitude - deckheight - 2`, with 20.1494 m for the Super Carrier
+  Nimitz hulls (`CVN_71/72/73/75`) and 20 m for the Forrestal.
+- **Read MOOSE before inventing carrier maths.** AIRBOSS has solved most of
+  it, and a sparse clone of `FlightControl-Master/MOOSE` (`Ops/Airboss.lua`,
+  `Wrapper/Positionable.lua`) works from the container. MOOSE is GPL like
+  Foothold: read it, take the facts, write our own code.
 
 ## greenieboard's trapsheet plotter
 

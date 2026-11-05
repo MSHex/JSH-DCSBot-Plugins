@@ -22,7 +22,7 @@ JT.cfg = JT.cfg or {
   -- raise S_EVENT_LANDING_QUALITY_MARK, so a pass anywhere else could never
   -- be graded. Filtering here rather than discarding later means a legacy
   -- deck costs no sampling work and sends no datagrams at all.
-  decks     = { 'CVN_', 'CV_59', 'Forrestal' },
+  decks     = { 'CVN_' },
 }
 JT.tracks = JT.tracks or {}   -- [unitName] = {carrier=, name=, type=, pts={}}
 
@@ -101,15 +101,46 @@ end
 -- Hence `-fwd` below. Projecting onto the ship's own basis vectors rather
 -- than deriving a perpendicular by hand is deliberate: it is the same
 -- primitive AIRBOSS uses, so there is no second derivation to get backwards.
+--
+-- Height is above the DECK, not above the ship. A ship's origin sits at the
+-- waterline, so u.y - c.y is ~20 m (~70 ft) too high on every sample and an
+-- on-glideslope pass plots high all the way to the ramp. AIRBOSS's
+-- _GetAltCarrier() is `GetAltitude() - deckheight - 2`, with the deck height
+-- per hull taken from DCS's own unit database; DECK below carries the same
+-- figures, and the same 2 m reference-point correction.
+local DECK = { CVN_ = 20.1494, Forrestal = 20.0 }
+local function deck(carrier)
+  local t = carrier:getTypeName()
+  for p, h in pairs(DECK) do
+    if t:sub(1, #p) == p then return h end
+  end
+  return 20.0
+end
+
 local function relative(unit, carrier)
   local u, c = unit:getPoint(), carrier:getPoint()
   local p = carrier:getPosition()
   -- p.x is the ship's forward axis, p.z its starboard axis. Both unit
   -- vectors, so a dot product is the projection straight off.
-  local dx, dy, dz = u.x - c.x, u.y - c.y, u.z - c.z
+  local dx, dz = u.x - c.x, u.z - c.z
   local fwd = dx * p.x.x + dz * p.x.z      -- + ahead of the ship
   local lat = dx * p.z.x + dz * p.z.z      -- + to starboard
-  return -fwd, lat, dy * FEET              -- astern +, starboard +, ft above deck
+  local alt = (u.y - deck(carrier) - 2) * FEET
+  return -fwd, lat, alt                    -- astern +, starboard +, ft above deck
+end
+
+-- Rate at which the aircraft is closing on the ship along its axis, m/s.
+--
+-- This is what keeps the downwind leg out of the trace. The downwind runs
+-- ~1.2 NM abeam at ~600 ft -- inside any sensible capture window -- but flown
+-- the opposite way to the ship, so it closes at a strongly NEGATIVE rate.
+-- Closing turns positive past the 90-degree point, which is where AIRBOSS
+-- starts recording too (its Final step). Without this the downwind and the
+-- whole 180 turn fold back over the groove on the plot.
+local function closing(unit, carrier)
+  local v, s = unit:getVelocity(), carrier:getVelocity()
+  local p = carrier:getPosition()
+  return (v.x - s.x) * p.x.x + (v.z - s.z) * p.x.z
 end
 
 local function key(unit)
@@ -135,29 +166,40 @@ function JT.tick()
 end
 
 function JT.sample(unit, decks)
-  -- Nearest deck.
-  local best, bestd
-  local up = unit:getPoint()
-  for _, c in pairs(decks) do
-    local cp = c:getPoint()
-    local d = math.sqrt((up.x - cp.x) ^ 2 + (up.z - cp.z) ^ 2)
-    if not bestd or d < bestd then best, bestd = c, d end
-  end
-  if not best then return end
-
   local k = key(unit)
   if not k then return end
   local track = JT.tracks[k]
+  local up = unit:getPoint()
+
+  -- A pass in progress stays locked to ITS deck. Re-picking the nearest
+  -- every tick would let a second carrier steal the track mid-groove.
+  local best, bestd
+  if track and track.deck and track.deck:isExist() then
+    best = track.deck
+    local cp = best:getPoint()
+    bestd = math.sqrt((up.x - cp.x) ^ 2 + (up.z - cp.z) ^ 2)
+  else
+    for _, c in pairs(decks) do
+      local cp = c:getPoint()
+      local d = math.sqrt((up.x - cp.x) ^ 2 + (up.z - cp.z) ^ 2)
+      if not bestd or d < bestd then best, bestd = c, d end
+    end
+  end
+  if not best then return end
 
   local x, z, alt = relative(unit, best)
   if not x then return end
 
+  -- 5 m/s rather than 0 so an aircraft stopped on the wires, or taxiing,
+  -- reads as NOT closing and the pass ends, instead of hovering on noise.
   local inside = bestd <= JT.cfg.range and alt <= JT.cfg.ceiling and x > 0
+                 and closing(unit, best) > 5
 
   if inside then
     if not track then
-      track = { carrier = best:getName(), name = unit:getPlayerName(),
-                utype = unit:getTypeName(), pts = {} }
+      track = { deck = best, carrier = best:getName(),
+                name = unit:getPlayerName(), utype = unit:getTypeName(),
+                pts = {} }
       JT.tracks[k] = track
     end
     if #track.pts < JT.cfg.maxpoints then

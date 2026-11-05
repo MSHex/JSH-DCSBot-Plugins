@@ -1,0 +1,82 @@
+type: map
+func: check_main_structure
+mapping:
+  DEFAULT:
+    include: jsh_trapsheet
+  regex;(.+):
+    type: map
+    func: is_node
+    desc: >-
+      Per-instance overrides, keyed on the INSTANCE name from nodes.yaml --
+      never the server name from servers.yaml. A section named after a server
+      validates as a map but matches no instance, so it silently does nothing.
+    example: DCS.Foothold
+    mapping:
+      regex;(.+):
+        include: jsh_trapsheet
+
+schema;jsh_trapsheet:
+  type: map
+  mapping:
+    enabled:
+      type: bool
+      nullable: false
+      desc: Whether approaches are sampled on this instance.
+      example: "true"
+    sample_rate:
+      type: float
+      nullable: false
+      desc: >-
+        Seconds between samples. 0.1 (10 Hz) is well above what the data
+        needs: glideslope and lineup are smooth, and AoA oscillates at roughly
+        0.5-2 Hz. A smaller value mostly samples DCS frame jitter and costs
+        that work on every approach.
+      example: "0.1"
+    capture_range_nm:
+      type: float
+      nullable: false
+      desc: Start sampling once the aircraft is within this many nautical miles of the deck.
+      example: "1.5"
+    capture_ceiling_ft:
+      type: float
+      nullable: false
+      desc: Only sample below this height above the deck, in feet.
+      example: "1500"
+    max_points:
+      type: int
+      nullable: false
+      desc: >-
+        Hard cap on samples per pass, so a long go-around inside the capture
+        window cannot grow without bound.
+      example: "600"
+    grade_wait:
+      type: float
+      nullable: false
+      desc: >-
+        Seconds to hold a finished pass waiting for the LSO grade. DCS only
+        raises S_EVENT_LANDING_QUALITY_MARK on Super Carrier decks, so on a
+        legacy deck this elapses and the pass is plotted without a grade.
+      example: "20"
+    night:
+      type: bool
+      nullable: false
+      desc: Whether passes on this instance are recorded as night traps.
+      example: "false"
+    axes:
+      type: map
+      nullable: false
+      desc: >-
+        Sign corrections for the carrier-relative frame. Which way is astern
+        and which is starboard is a convention to confirm against one real
+        trap, not to reason out.
+      mapping:
+        invert_x:
+          type: bool
+          nullable: false
+          desc: Flip the along-deck axis if the approach plots back to front.
+          example: "false"
+        invert_z:
+          type: bool
+          nullable: false
+          desc: Flip the lateral axis if lineup is mirrored left for right.
+          example: "false"

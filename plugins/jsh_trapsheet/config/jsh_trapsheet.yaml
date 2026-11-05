@@ -1,0 +1,25 @@
+DEFAULT:
+  enabled: true
+  # Seconds between samples. 10 Hz is well above what the signals need:
+  # glideslope and lineup are smooth, and AoA oscillates at roughly 0.5-2 Hz,
+  # so this is comfortably past Nyquist. Going faster mainly samples DCS's own
+  # frame jitter and costs that work on every approach.
+  sample_rate: 0.1
+  # Start sampling inside this range of the deck, below this height above it.
+  capture_range_nm: 1.5
+  capture_ceiling_ft: 1500
+  # Hard cap per pass, so a long go-around cannot grow without bound.
+  max_points: 600
+  # How long to hold a finished pass waiting for the LSO grade. DCS only
+  # raises S_EVENT_LANDING_QUALITY_MARK on Super Carrier decks, so on a legacy
+  # deck this elapses and the pass is plotted without a grade.
+  grade_wait: 20
+  axes:
+    # Flip if the plotted approach comes out mirrored. Which way is 'astern'
+    # and which is 'starboard' is a convention to confirm against one real
+    # trap, not something to reason out -- see the README.
+    invert_x: false
+    invert_z: false
+
+your-instance-name:
+  enabled: true

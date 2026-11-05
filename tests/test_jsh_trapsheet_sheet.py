@@ -83,17 +83,22 @@ def sampled(typename: str) -> bool:
     return any(typename.startswith(p) for p in sheet.DEFAULT_DECKS)
 
 
-for hull in ['CVN_71', 'CVN_72', 'CVN_73', 'CVN_75', 'CV_59', 'Forrestal']:
+# The four Super Carrier hulls, by their AIRBOSS CarrierType type names.
+for hull in ['CVN_71', 'CVN_72', 'CVN_73', 'CVN_75']:
     check(f"{hull} is sampled", sampled(hull),
           "a Super Carrier hull that is not sampled gets no trapsheet at all")
 
-for hull in ['Stennis', 'KUZNECOW', 'LHA_Tarawa', 'CVN']:
+# Stennis and Enterprise are NOT Super Carrier; Forrestal is Heatblur's and
+# opt-in until it is confirmed to be graded. 'cvn-65' is lower case with a
+# hyphen, and must not slip through a careless prefix.
+for hull in ['Stennis', 'KUZNECOW', 'LHA_Tarawa', 'CVN', 'cvn-65',
+             'Forrestal', 'USS Enterprise 1966']:
     check(f"{hull} is not sampled", not sampled(hull),
           "only Super Carrier decks raise S_EVENT_LANDING_QUALITY_MARK, so a "
           "pass here could never be graded")
 
 eq("the deck list renders as a Lua table",
-   sheet.lua_list(('CVN_', 'CV_59')), '{"CVN_","CV_59"}')
+   sheet.lua_list(('CVN_', 'Forrestal')), '{"CVN_","Forrestal"}')
 eq("an empty deck list is still valid Lua", sheet.lua_list([]), '{}')
 check("a quote in a deck name cannot break out of the literal",
       sheet.lua_list(['a"b']) == '{"a\\"b"}')
@@ -126,6 +131,21 @@ eq("samples outside the wake do not count",
    sheet.groove_time([[3000.0, 0, 0, 8.1]] * 50 + inside, 0.1), 18.0)
 eq("no samples yields no groove time", sheet.groove_time([], 0.1), None)
 eq("a zero rate cannot divide anything", sheet.groove_time(inside, 0), None)
+
+# ------------------------------------------------------------ presentation
+eq("a graded pass shows the grade and what it means",
+   sheet.grade_line('_OK_'), '**_OK_** \u2014 Unicorn \u2014 a perfect pass')
+eq("an ungraded pass says so rather than inventing one",
+   sheet.grade_line(None), 'Not graded')
+check("every grade that scores points also has wording",
+      all(g in sheet.GRADE_TEXT for g in sheet.POINTS),
+      "a grade with points but no text would post a bare letter")
+check("every grade that scores points also has a colour",
+      all(g in sheet.GRADE_COLOUR for g in sheet.POINTS))
+check("an unknown grade still gets a usable colour",
+      isinstance(sheet.colour_of('???'), int))
+check("no grade gets the neutral colour, not the good one",
+      sheet.colour_of(None) != sheet.colour_of('OK'))
 
 failed = [c for c in checks if not c[1]]
 for label, ok, detail in checks:

@@ -1,7 +1,6 @@
 import asyncio
-import time
 
-from core import EventListener, event, Server, Player, chat_command
+from core import EventListener, event, Server, Player
 from typing import TYPE_CHECKING
 
 from . import sheet
@@ -9,27 +8,32 @@ from . import sheet
 if TYPE_CHECKING:
     from .commands import TrapSheet
 
+Key = tuple[str, str]   # (server name, player name)
+
 
 class TrapSheetEventListener(EventListener["TrapSheet"]):
     """
-    Correlates a sampled approach with the LSO grade, and stores the result.
+    Pairs a sampled approach with its LSO grade, then hands both on.
 
     Two things arrive separately and have to be matched up:
 
-      * `jshTrapsheet` -- our own samples, sent by the mission as soon as the
-        pass ends (touchdown, bolter or departure from the capture window).
-      * `S_EVENT_LANDING_QUALITY_MARK` -- the stock Super Carrier LSO grade,
-        which arrives through the bot's normal mission-event path.
+      * `jshTrapsheet` -- our samples, sent by the mission when the pass ends.
+      * `S_EVENT_LANDING_QUALITY_MARK` -- the Super Carrier LSO grade, through
+        the bot's normal mission-event path.
 
-    The grade is the one that may never come: DCS only raises it on Super
-    Carrier decks. So the samples are held briefly and flushed on a timer if
-    no grade turns up, which is how a legacy deck still gets a picture.
+    EITHER may arrive first. They travel different paths and nothing orders
+    them: on a trap the samples flush 0.1 s after touchdown, but on a
+    wave-off or a bolter they only flush once the aircraft has passed the
+    ship, by which time the grade has often already landed. So each side
+    waits for the other, for `grade_wait` seconds, and whichever arrives
+    second completes the pair. An earlier version only waited on the grade
+    and silently dropped any pass whose grade came first.
     """
 
     def __init__(self, plugin: "TrapSheet"):
         super().__init__(plugin)
-        # (server_name, player_name) -> {'points': [...], 'at': monotonic, ...}
-        self.pending: dict[tuple[str, str], dict] = {}
+        self.samples: dict[Key, dict] = {}   # waiting for a grade
+        self.grades: dict[Key, dict] = {}    # waiting for samples
         # asyncio.create_task with no retained reference can be collected
         # before it runs. Keep them until they are done.
         self._tasks: set[asyncio.Task] = set()
@@ -39,8 +43,17 @@ class TrapSheetEventListener(EventListener["TrapSheet"]):
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
+    def _forget(self, server: Server) -> None:
+        self.samples = {k: v for k, v in self.samples.items() if k[0] != server.name}
+        self.grades = {k: v for k, v in self.grades.items() if k[0] != server.name}
+
     @event(name="registerDCSServer")
     async def registerDCSServer(self, server: Server, data: dict) -> None:
+        config = self.plugin.get_config(server)
+        if config.get('channel'):
+            # Same check greenieboard does: fail loudly at startup if the
+            # channel is wrong, rather than silently on the first trap.
+            self.plugin.bot.check_channel(int(config['channel']))
         # Do not test server.status here. The mission plugin sets it inside
         # ITS OWN registerDCSServer handler and listener order across plugins
         # is not guaranteed, so RUNNING/PAUSED is always false at this point.
@@ -49,11 +62,12 @@ class TrapSheetEventListener(EventListener["TrapSheet"]):
 
     @event(name="onMissionLoadEnd")
     async def onMissionLoadEnd(self, server: Server, data: dict) -> None:
-        # A new mission wipes the injected hook, so put it back.
-        self.pending = {k: v for k, v in self.pending.items() if k[0] != server.name}
+        # A new mission wipes the injected hook, so put it back -- and drop
+        # any half-pair from the old mission, which can never complete now.
+        self._forget(server)
         self._spawn(self.plugin.load_lua(server))
 
-    # --------------------------------------------------------------- samples
+    # ------------------------------------------------------------- the halves
     @event(name="jshTrapsheet")
     async def jshTrapsheet(self, server: Server, data: dict) -> None:
         """A finished pass, sampled mission-side."""
@@ -64,62 +78,72 @@ class TrapSheetEventListener(EventListener["TrapSheet"]):
         config = self.plugin.get_config(server)
         if not config.get('enabled', True):
             return
-
-        key = (server.name, name)
-        self.pending[key] = {
+        self.log.debug(f"JSH TrapSheet: {len(points)} samples for {name} on {server.name}")
+        await self._arrive(server, (server.name, name), config, samples={
             'points': points,
             'unit_type': data.get('unit_type') or '',
             'carrier': data.get('carrier') or '',
-            'at': time.monotonic(),
-        }
-        self.log.debug(f"JSH TrapSheet: {len(points)} samples for {name} on {server.name}")
+        })
 
-        grace = float(config.get('grade_wait', 20))
-        self._spawn(self._expire(server, key, grace))
-
-    async def _expire(self, server: Server, key: tuple[str, str], grace: float) -> None:
-        """
-        Drop a pass that never got an LSO grade.
-
-        Nothing is plotted or stored. An ungraded pass is clutter on the
-        greenieboard, and the mission only samples Super Carrier decks
-        anyway, so reaching here means the grade was genuinely lost -- the
-        player disconnected mid-pass, or DCS raised no quality mark. The
-        timer exists so `pending` cannot grow without bound.
-        """
-        await asyncio.sleep(grace)
-        if self.pending.pop(key, None) is not None:
-            self.log.debug(f"JSH TrapSheet: no LSO grade for {key[1]} within "
-                           f"{grace}s; discarding the pass.")
-
-    # ----------------------------------------------------------------- grade
     @event(name="onMissionEvent")
     async def onMissionEvent(self, server: Server, data: dict) -> None:
         if data.get('eventName') != 'S_EVENT_LANDING_QUALITY_MARK':
             return
-        if 'initiator' not in data or 'name' not in data['initiator']:
+        initiator = data.get('initiator') or {}
+        if 'name' not in initiator:
             return
         config = self.plugin.get_config(server)
         if not config.get('enabled', True):
             return
-        player: Player = server.get_player(name=data['initiator']['name'])
+        await self._arrive(server, (server.name, initiator['name']), config, grade={
+            'comment': data.get('comment', '') or '',
+        })
+
+    # --------------------------------------------------------------- pairing
+    async def _arrive(self, server: Server, key: Key, config: dict,
+                      samples: dict | None = None, grade: dict | None = None) -> None:
+        """One half has arrived. Complete the pair, or wait for the other."""
+        if samples is not None:
+            other = self.grades.pop(key, None)
+            if other is None:
+                self.samples[key] = samples
+                self._spawn(self._expire(self.samples, key, config, 'grade'))
+                return
+            grade = other
+        else:
+            other = self.samples.pop(key, None)
+            if other is None:
+                self.grades[key] = grade
+                self._spawn(self._expire(self.grades, key, config, 'samples'))
+                return
+            samples = other
+
+        player: Player = server.get_player(name=key[1])
         if not player:
+            # Left between the pass and now. The samples cannot be filed
+            # against a UCID we no longer have, so let it go.
             return
 
-        key = (server.name, data['initiator']['name'])
-        pass_ = self.pending.pop(key, None)
-        if pass_ is None:
-            # Graded, but we have no samples. Nothing to draw; greenieboard's
-            # own SC path has already recorded the grade, so leave it alone.
-            return
-
-        comment = data.get('comment', '') or ''
-        grade = sheet.grade_of(comment)
-        if grade is None:
+        comment = grade['comment']
+        parsed = sheet.grade_of(comment)
+        if parsed is None:
             # Graded by DCS but unparseable. Rare, and worth saying out loud
             # rather than silently filing a blank: it means the LSO comment
             # format has changed under us.
             self.log.warning(f"JSH TrapSheet: could not read a grade out of "
-                             f"{comment!r} for {player.name}; storing the pass "
-                             f"without one.")
-        await self.plugin.store(server, player, pass_, grade=grade, comment=comment)
+                             f"{comment!r} for {player.name}.")
+        await self.plugin.store(server, player, samples, grade=parsed, comment=comment)
+
+    async def _expire(self, waiting: dict, key: Key, config: dict, missing: str) -> None:
+        """
+        Drop a half that never found its partner.
+
+        Nothing is plotted or stored. An ungraded pass is clutter, and a grade
+        with no samples is already on greenieboard without our help. The timer
+        exists so neither dict can grow without bound.
+        """
+        grace = float(config.get('grade_wait', 20))
+        await asyncio.sleep(grace)
+        if waiting.pop(key, None) is not None:
+            self.log.debug(f"JSH TrapSheet: no {missing} for {key[1]} within "
+                           f"{grace}s; dropping the other half.")

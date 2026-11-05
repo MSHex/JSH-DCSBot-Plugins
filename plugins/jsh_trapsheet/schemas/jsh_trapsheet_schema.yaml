@@ -23,6 +23,16 @@ schema;jsh_trapsheet:
       nullable: false
       desc: Whether approaches are sampled on this instance.
       example: "true"
+    channel:
+      type: int
+      nullable: false
+      desc: >-
+        Discord channel id the trapsheet is posted to. Omit it and nothing is
+        posted; the pass is still stored and still appears in /traps.
+        greenieboard itself only posts a one-line text message to the events
+        channel and never attaches the picture, so without this the plot is
+        only ever seen by someone running /traps.
+      example: "123456789012345678"
     sample_rate:
       type: float
       nullable: false
@@ -72,11 +82,6 @@ schema;jsh_trapsheet:
         arrives the pass is discarded rather than plotted, which only happens
         when the grade was genuinely lost, such as a disconnect mid-pass.
       example: "20"
-    night:
-      type: bool
-      nullable: false
-      desc: Whether passes on this instance are recorded as night traps.
-      example: "false"
     axes:
       type: map
       nullable: false

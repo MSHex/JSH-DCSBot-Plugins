@@ -42,7 +42,13 @@ AIRCRAFT = {
 #: Prefixes, not exact names: the Super Carrier hulls are numbered
 #: individually (CVN_71, CVN_72, CVN_73, CVN_75) and an exact-name list would
 #: match none of them on a real server.
-DEFAULT_DECKS = ('CVN_', 'CV_59', 'Forrestal')
+#: `CVN_` covers the four Super Carrier hulls -- CVN_71, CVN_72, CVN_73 and
+#: CVN_75, per AIRBOSS's CarrierType table. Nothing else is in by default.
+#: Forrestal is Heatblur's, not part of the Super Carrier module, and whether
+#: DCS grades it has not been confirmed; add it in config to find out. An
+#: ungraded pass is discarded, so the cost of trying is wasted sampling, not
+#: clutter.
+DEFAULT_DECKS = ('CVN_',)
 
 
 def lua_list(values) -> str:
@@ -177,3 +183,38 @@ def groove_time(points: list, rate: float) -> Optional[float]:
                  if isinstance(p, (list, tuple)) and len(p) >= 1
                  and 0 < float(p[0]) <= wake)
     return round(inside * rate, 1) if inside else None
+
+
+#: What each LSO grade means, for the embed. Wording follows the standard
+#: LSO grade sheet rather than being invented here.
+GRADE_TEXT = {
+    '_OK_': 'Unicorn — a perfect pass',
+    'OK': 'Fair pass, reasonable deviations',
+    '(OK)': 'Fair pass with one or more corrected deviations',
+    '--': 'No-grade. Below average but safe',
+    'B': 'Bolter',
+    'WO': 'Wave-off',
+    'OWO': 'Own wave-off',
+    'WOP': 'Wave-off, pattern',
+    'LIG': 'Long in the groove',
+    'C': 'Cut pass — unsafe',
+}
+
+#: Embed colour by how the pass went. Green good, amber marginal, red unsafe.
+GRADE_COLOUR = {
+    '_OK_': 0x2ECC71, 'OK': 0x2ECC71, '(OK)': 0xF1C40F, '--': 0xE67E22,
+    'B': 0xE67E22, 'OWO': 0xE67E22, 'WOP': 0xE67E22,
+    'WO': 0xE74C3C, 'LIG': 0xE74C3C, 'C': 0xE74C3C,
+}
+
+
+def grade_line(grade: Optional[str]) -> str:
+    """The grade and what it means, or an honest blank."""
+    if not grade:
+        return 'Not graded'
+    text = GRADE_TEXT.get(grade)
+    return f"**{grade}** — {text}" if text else f"**{grade}**"
+
+
+def colour_of(grade: Optional[str]) -> int:
+    return GRADE_COLOUR.get(grade or '', 0x95A5A6)

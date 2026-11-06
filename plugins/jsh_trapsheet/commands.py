@@ -184,7 +184,7 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
                       f"traps row={row if row is not None else 'none'}")
 
         await self.post(server, player, config, image, grade, comment,
-                        pass_.get('carrier') or '', wire, tgroove)
+                        pass_.get('carrier') or '', wire, tgroove, unit_type)
 
     async def _attach(self, server: Server, player: Player, grade: str,
                       image: bytes | None, trapdata, tgroove) -> int | None:
@@ -242,7 +242,8 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
     # ------------------------------------------------------------------- post
     async def post(self, server: Server, player: Player, config: dict,
                    image: bytes | None, grade: str | None, comment: str,
-                   carrier: str, wire: int | None, tgroove: float | None) -> None:
+                   carrier: str, wire: int | None, tgroove: float | None,
+                   unit_type: str) -> None:
         """
         Put the trapsheet in a Discord channel.
 
@@ -265,7 +266,9 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
                              f"reachable; the pass was stored but not posted.")
             return
 
-        title = f"{player.name} | {sheet.aircraft_label(player.unit_type or '')}"
+        # The type recorded WITH the pass: by now the pilot may have
+        # changed slot, and player.unit_type would name the wrong airframe.
+        title = f"{player.name} | {sheet.aircraft_label(unit_type)}"
         if carrier:
             title += f" | {carrier}"
 
@@ -273,7 +276,9 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
         embed.add_field(name="LSO Grade",
                         value=sheet.grade_line(grade), inline=False)
         if comment:
-            embed.add_field(name="LSO Comment", value=f"`{comment}`", inline=False)
+            # A backtick in the comment would close the code span early.
+            embed.add_field(name="LSO Comment",
+                            value=f"`{comment.replace('`', "'")}`", inline=False)
         if wire:
             embed.add_field(name="Wire", value=str(wire), inline=True)
         if tgroove:

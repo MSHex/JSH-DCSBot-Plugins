@@ -6,6 +6,7 @@ plugin -- only numpy, which matplotlib already pulls in. That keeps it
 testable without the bot on the path, and keeps the parsing honest: every
 rule here is checkable against a string, with no server to stand up.
 """
+import io
 import re
 
 from typing import Any, Optional
@@ -228,3 +229,38 @@ def grade_line(grade: Optional[str]) -> str:
 
 def colour_of(grade: Optional[str]) -> int:
     return GRADE_COLOUR.get(grade or '', 0x95A5A6)
+
+
+def render(ts: dict, pinfo: dict, trapfile: str) -> bytes:
+    """
+    The trapsheet PNG, drawn by greenieboard's own plotter.
+
+    `trapfile` is a synthetic name, never a real path -- the plotter opens
+    nothing, it only substring-matches the stem to choose the AoA
+    reference band. See sheet.trapfile_name().
+
+    Imported here rather than at module level: greenieboard is a stock
+    plugin and always present, but a module-level import would make this
+    plugin fail to LOAD rather than fail to draw if that ever stopped
+    being true, and a missing picture is a far better outcome than a
+    plugin that will not start.
+    """
+    from matplotlib.figure import Figure
+    from plugins.greenieboard.trapsheet import plot_trapsheet
+
+    # A Figure pyplot never sees, saved through ITSELF.
+    #
+    # The first live trap stored a blank 3048x1350 image in place of the
+    # 1200x900 trapsheet. plt.savefig() saves pyplot's CURRENT figure,
+    # which is process-wide, and the trap had just triggered greenieboard
+    # to redraw its board -- a report figure (core/report/elements.py,
+    # plt.figure) created in another thread in the same instant. That
+    # figure was current when we saved, so we stored it. Reproduced with
+    # the live samples; this version survives the same race.
+    fig = Figure(facecolor="#404040", dpi=150)
+    fig.set_size_inches(8, 6)
+    axs = fig.subplots(3, 1, sharex=True)
+    plot_trapsheet(axs, ts, pinfo, trapfile)
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png')
+    return buf.getvalue()

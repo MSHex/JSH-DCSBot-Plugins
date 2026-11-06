@@ -6,7 +6,6 @@ import os
 import discord
 import matplotlib
 matplotlib.use('Agg')                      # no display on a headless node
-import matplotlib.pyplot as plt            # noqa: E402
 import psycopg                             # noqa: E402
 
 from core import Plugin, Server, Player, Status          # noqa: E402
@@ -97,33 +96,6 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
         self.log.debug(f"JSH TrapSheet: sampler injected into {server.name} ({size} bytes)")
 
     # ----------------------------------------------------------------- drawing
-    @staticmethod
-    def render(ts: dict, pinfo: dict, trapfile: str) -> bytes:
-        """
-        The trapsheet PNG, drawn by greenieboard's own plotter.
-
-        `trapfile` is a synthetic name, never a real path -- the plotter opens
-        nothing, it only substring-matches the stem to choose the AoA
-        reference band. See sheet.trapfile_name().
-
-        Imported here rather than at module level: greenieboard is a stock
-        plugin and always present, but a module-level import would make this
-        plugin fail to LOAD rather than fail to draw if that ever stopped
-        being true, and a missing picture is a far better outcome than a
-        plugin that will not start.
-        """
-        from plugins.greenieboard.trapsheet import plot_trapsheet
-
-        fig, axs = plt.subplots(3, 1, sharex=True, facecolor="#404040", dpi=150)
-        fig.set_size_inches(8, 6)
-        try:
-            plot_trapsheet(axs, ts, pinfo, trapfile)
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png')
-            return buf.getvalue()
-        finally:
-            plt.close(fig)
-
     # ------------------------------------------------------------------- store
     async def store(self, server: Server, player: Player, pass_: dict,
                     grade: str | None, comment: str) -> None:
@@ -156,7 +128,7 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
         else:
             try:
                 image = await asyncio.to_thread(
-                    self.render, ts, pinfo,
+                    sheet.render, ts, pinfo,
                     sheet.trapfile_name(unit_type, player.name))
             except Exception as ex:
                 self.log.warning(f"JSH TrapSheet: could not plot the pass for "

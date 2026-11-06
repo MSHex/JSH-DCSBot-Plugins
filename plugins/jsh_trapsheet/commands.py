@@ -327,7 +327,7 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
             # FunkMan's "N PTS" badge, top right. Drawn, because an embed's
             # top-right corner only takes an image. A failure costs the badge.
             try:
-                files.append(discord.File(io.BytesIO(sheet.badge(info['points'])),
+                files.append(discord.File(io.BytesIO(sheet.badge(info['points'], grade)),
                                           filename='points.png'))
                 embed.set_thumbnail(url="attachment://points.png")
             except Exception as ex:

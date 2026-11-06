@@ -508,18 +508,36 @@ def render(ts: dict, pinfo: dict, trapfile: str, info: Optional[dict] = None) ->
     return buf.getvalue()
 
 
-#: Badge text colour by points, as FunkMan's reads: black for nothing, through
-#: red, orange and gold, to green for a pass worth having.
-BADGE_COLOURS = ((4.0, '#27ae60'), (3.0, '#d4a017'), (2.0, '#e67e22'),
-                 (1.0, '#c0392b'), (0.0, '#000000'))
+#: Badge text colour by grade: greenieboard's own board colours
+#: (plugins/greenieboard/const.py GRADES), so the badge matches the board.
+#: Two are ours: greenieboard gives a perfect pass no colour (it draws a
+#: unicorn instead), so gold; and it gives a no-count white, which would
+#: vanish on the badge's white square, so grey.
+BADGE_COLOURS = {
+    '_OK_': '#d4af37',
+    'OK': '#29c248',
+    '(OK)': '#f2c038',
+    'B': '#088199',
+    '--': '#73481d',
+    'WO': '#000000',
+    'C': '#cc0000',
+    'NC': '#7f8c8d',
+}
+
+#: When the grade is unknown, the same colours keyed by the points each grade
+#: scores. 0 means a cut here; a no-count is only told apart by its grade.
+_BY_POINTS = ((5.0, '_OK_'), (4.0, 'OK'), (3.0, '(OK)'), (2.5, 'B'),
+              (2.0, '--'), (1.0, 'WO'), (0.0, 'C'))
 
 
-def badge_colour(points) -> str:
+def badge_colour(points, grade: Optional[str] = None) -> str:
+    if grade in BADGE_COLOURS:
+        return BADGE_COLOURS[grade]
     p = float(points or 0)
-    return next(c for floor, c in BADGE_COLOURS if p >= floor)
+    return BADGE_COLOURS[next(g for floor, g in _BY_POINTS if p >= floor)]
 
 
-def badge(points, size: float = 36) -> bytes:
+def badge(points, grade: Optional[str] = None, size: float = 36) -> bytes:
     """
     The "N PTS" picture for the embed's top-right corner.
 
@@ -535,11 +553,11 @@ def badge(points, size: float = 36) -> bytes:
     fig = Figure(figsize=(2, 2), dpi=64, facecolor='white')
     canvas = FigureCanvasAgg(fig)
     label = fig.text(0.5, 0.5, text, ha='center', va='center',
-                     fontweight='bold', fontsize=size, color=badge_colour(points))
-    # Fit the label to the square by MEASURING it, not by picking a size. The
-    # width of "2.5 PTS" depends on which font matplotlib finds, and that
-    # differs between machines -- it changed in this container when the font
-    # cache was rebuilt, and a size that fitted then ran off both edges after.
+                     fontweight='bold', fontsize=size, color=badge_colour(points, grade))
+    # Fit the label to the square by MEASURING it, not by trusting a size.
+    # "2.5 PTS" at 36 pt is 121.7 px of the 128 available in DejaVu Sans,
+    # matplotlib's default -- too tight to rely on when the bot's host may
+    # resolve a different, wider bold face. Shrink until it has a margin.
     room = 0.84 * fig.bbox.width
     for _ in range(3):
         width = label.get_window_extent(canvas.get_renderer()).width

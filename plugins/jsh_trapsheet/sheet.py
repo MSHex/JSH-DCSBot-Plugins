@@ -292,7 +292,185 @@ def style_aoa_band(ax) -> bool:
     return True
 
 
-def render(ts: dict, pinfo: dict, trapfile: str) -> bytes:
+# ----------------------------------------------------------------- details
+
+#: Hull type -> the name FunkMan prints. From AIRBOSS's CarrierType table
+#: (Airboss.lua:1321-1346), not from memory.
+CARRIERS = {
+    'CVN_71': 'Roosevelt',
+    'CVN_72': 'Lincoln',
+    'CVN_73': 'Washington',
+    'CVN_75': 'Truman',
+    'Forrestal': 'Forrestal',
+}
+
+_DETAILS = re.compile(r'GRADE:\s*[^:\s]+\s*:?\s*(.*)', re.S)
+
+
+def details_of(comment: str) -> str:
+    """The LSO comment after the grade, without the wire: `_LOIC_ _LOAR_ [BC]`."""
+    if not comment:
+        return ''
+    m = _DETAILS.search(comment)
+    text = m.group(1) if m else comment
+    return ' '.join(re.sub(r'WIRE#\s*\d', ' ', text).split())
+
+
+def clock_text(seconds) -> Optional[str]:
+    """Mission time of day, hh:mm:ss, from timer.getAbsTime()."""
+    if seconds is None:
+        return None
+    s = int(seconds) % 86400
+    return f"{s // 3600:02d}:{s // 60 % 60:02d}:{s % 60:02d}"
+
+
+_INTENSITY = ((r'\((.*?)\)', ' (a little)'),
+              (r'_(.*?)_', ' (a lot!)'),
+              (r'\[(.*?)\]', ' (ignored)'))
+
+
+def _deflate(codes: str, errors: dict) -> tuple[list, str]:
+    """
+    Split run-together LSO codes into words, as greenieboard does: take the
+    first key of ERRORS (which is ordered longest first) found in what is
+    left, until nothing matches. Returns the words and whatever did not match.
+    """
+    words = []
+    while codes:
+        for key, text in errors.items():
+            if key and key in codes:
+                if text:
+                    words.append(text)
+                codes = codes.replace(key, '', 1)
+                break
+        else:
+            break
+    return words, codes
+
+
+def decode(details: str, errors: dict, marks: dict) -> list:
+    """
+    The LSO comment in words, grouped by where on the approach it applied.
+
+    `errors` and `marks` are greenieboard's own ERRORS and DISTANCE_MARKS
+    tables, passed in so this module stays free of bot imports and the
+    wording always matches /traps.
+
+    Each token is codes, a distance mark, and brackets for how much:
+    `(..)` a little, `_.._` a lot, `[..]` ignored. The mark sits inside the
+    brackets as often as outside -- `_LOIC_`, `(LUL)IM` -- so it is looked
+    for in both. A mark is only taken off if what remains decodes completely,
+    so a code that happens to end in a mark's letters (TTL, "turned too late",
+    ends in TL) is not mistaken for one.
+
+    Returns [(section title, [lines])], in approach order, "Overall" last.
+    """
+    # LSO codes are always capitals. Lower case means DCS wrote prose instead
+    # -- "No proper communications" for a no-count -- which is shown as it is
+    # rather than decoded into "Nose, o, proper, communications".
+    if re.search(r'[a-z]', details or ''):
+        return [('Overall', [details.strip()])]
+
+    order = sorted(marks, key=len, reverse=True)
+    sections: dict = {}
+
+    def strip_mark(s: str):
+        for mk in order:
+            if s.endswith(mk):
+                head = s[:-len(mk)]
+                if head == '' or _deflate(head, errors)[1] == '':
+                    return head, mk
+        return s, None
+
+    for token in details.replace('/', '').split():
+        parts = []
+        rest = token
+        for pattern, label in _INTENSITY:
+            parts += [(found, label) for found in re.findall(pattern, rest)]
+            rest = re.sub(pattern, '', rest)
+        if rest:
+            parts.append((rest, ''))
+
+        # The mark: whichever part carries it, applied to the whole token.
+        mark = None
+        cleaned = []
+        for codes, label in parts:
+            if mark is None:
+                head, found = strip_mark(codes)
+                if found:
+                    mark, codes = found, head
+                    if found == 'BC' and not head:
+                        # [BC]: the ball call itself, ignored or not.
+                        cleaned.append(('', label))
+                        continue
+            cleaned.append((codes, label))
+
+        lines = sections.setdefault(mark, [])
+        for codes, label in cleaned:
+            if not codes:
+                if mark == 'BC':
+                    lines.append(label.strip(' ()!').capitalize() or 'Made')
+                continue
+            words, left = _deflate(codes, errors)
+            words += [left] if left else []
+            lines += [w + label for w in words]
+
+    titles = {mk: re.sub(r'\s*\(.*\)', '', text) for mk, text in marks.items()}
+    out = [(titles[mk], sections[mk]) for mk in marks if sections.get(mk)]
+    if sections.get(None):
+        out.append(('Overall', sections[None]))
+    return out
+
+
+def annotate(fig, info: dict) -> None:
+    """
+    FunkMan's furniture: title and grade line top centre, a carrier box top
+    right, mission map and date bottom left, real date bottom right.
+
+    Every key in `info` is optional; a missing one drops its text, never the
+    picture.
+    """
+    text = '#d8d8d8'
+    fig.subplots_adjust(top=0.86, bottom=0.11)
+
+    title = f"Trapsheet of {info.get('callsign') or '?'} [{info.get('unit_type') or '?'}]"
+    second = []
+    if info.get('legend'):
+        second.append(str(info['legend']))
+    if info.get('points') is not None:
+        second.append(f"{float(info['points']):g}PT")
+    line2 = ' '.join(second)
+    if info.get('details'):
+        line2 = f"{line2} - {info['details']}" if line2 else info['details']
+    fig.suptitle(title + ('\n' + line2 if line2 else ''), color=text,
+                 fontsize=12, y=0.985)
+
+    box = [x for x in (
+        info.get('carrier_name'),
+        info.get('hull'),
+        f"Case {info['case']}" if info.get('case') else None,
+        f"Wind {float(info['wind']):.0f}" if info.get('wind') is not None else None,
+        f"{info['wire']} wire" if info.get('wire') else None,
+        f"$T_G$={float(info['tgroove']):.1f}" if info.get('tgroove') else None,
+    ) if x]
+    if box:
+        fig.text(0.99, 0.985, '\n'.join(box), ha='right', va='top', color=text,
+                 fontsize=9, linespacing=1.3,
+                 bbox=dict(boxstyle='round,pad=0.4', facecolor='#404040',
+                           edgecolor='#a9c3dd', linewidth=1.2))
+
+    where = info.get('theatre')
+    when = ' '.join(x for x in (info.get('date'),
+                                f"({info['clock']})" if info.get('clock') else None) if x)
+    if where or when:
+        fig.text(0.005, 0.008, ': '.join(x for x in (where, when) if x),
+                 color=text, alpha=0.6, fontsize=8)
+    if info.get('now'):
+        fig.text(0.995, 0.008, info['now'], ha='right', color=text, alpha=0.6,
+                 fontsize=8)
+
+
+def render(ts: dict, pinfo: dict, trapfile: str, info: Optional[dict] = None) -> bytes:
     """
     The trapsheet PNG, drawn by greenieboard's own plotter.
 
@@ -323,6 +501,8 @@ def render(ts: dict, pinfo: dict, trapfile: str) -> bytes:
     axs = fig.subplots(3, 1, sharex=True)
     plot_trapsheet(axs, ts, pinfo, trapfile)
     style_aoa_band(axs[2])
+    if info:
+        annotate(fig, info)
     buf = io.BytesIO()
     fig.savefig(buf, format='png')
     return buf.getvalue()

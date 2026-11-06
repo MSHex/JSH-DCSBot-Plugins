@@ -120,6 +120,53 @@ finally:
 check("render() restyles the AoA panel of the picture it returns", len(seen) == 1,
       "the band would be drawn greenieboard's way, thin and with no on-speed line")
 
+# 5. The comment in words, against greenieboard's own tables. Fixtures are
+#    real: the first live trap, and two passes TacticalPaddles described,
+#    with its descriptions as the expected wording.
+from plugins.greenieboard.const import ERRORS, DISTANCE_MARKS  # noqa: E402
+
+
+def words(details):
+    return {title: lines for title, lines in sheet.decode(details, ERRORS, DISTANCE_MARKS)}
+
+
+got = words("_LOIC_ _LOAR_ _EGIW_ [BC]")
+check("live trap: low in close, a lot", got.get('In close') == ['Low (a lot!)'], str(got))
+check("live trap: eased gun in the wires",
+      got.get('In the wires') == ['Eased gun (cut throttle on touchdown) (a lot!)'], str(got))
+check("live trap: ball call ignored", got.get('Ball call') == ['Ignored'], str(got))
+
+got = words("(LUL)IM LULIC LULAR LOAW")   # TacticalPaddles, F-14B wave-off
+check("TP: a little lined up left in the middle",
+      got.get('In the middle') == ['Lined up left (a little)'], str(got))
+check("TP: lined up left in close and at the ramp",
+      got.get('In close') == ['Lined up left'] and got.get('At the ramp') == ['Lined up left'],
+      str(got))
+check("TP: low all the way", got.get('All the way') == ['Low'], str(got))
+
+got = words("(LL)IW LO(LUL)AW (LIG)")     # TacticalPaddles, F-14B cut
+check("TP: landed left in the wires", got.get('In the wires') == ['Landed left (a little)'],
+      str(got))
+check("TP: low and a little lined up left all the way",
+      sorted(got.get('All the way', [])) == ['Lined up left (a little)', 'Low'], str(got))
+check("TP: long in the groove, with no distance mark",
+      got.get('Overall') == ['Long in the groove (a little)'], str(got))
+
+got = words("TTL")
+check("a code ending in a mark's letters is not split -- TTL is not T + TL",
+      got.get('Overall') == ['Turned too late'], str(got))
+
+# 6. The annotated picture still comes back whole.
+png = sheet.render(ts, pinfo, trapfile, {
+    'callsign': 'Test', 'unit_type': 'FA-18C_hornet', 'legend': 'CUT', 'points': 0,
+    'details': '_LOIC_', 'carrier_name': 'Lincoln', 'hull': 'CVN_72', 'case': 1,
+    'wind': 24.0, 'wire': 2, 'tgroove': 23.9, 'theatre': 'Caucasus',
+    'date': '2024/6/1', 'clock': '10:56:44', 'now': '2026-Nov-06 (10:56:45)'})
+check("annotated render is still OUR 1200x900 figure",
+      Image.open(io.BytesIO(png)).size == (1200, 900))
+check("an annotation with nothing in it is not an error",
+      Image.open(io.BytesIO(sheet.render(ts, pinfo, trapfile, {'callsign': 'x'}))).size == (1200, 900))
+
 failed = [c for c in checks if not c[1]]
 for label, ok, detail in checks:
     print(('  ok  ' if ok else ' FAIL '), label, f'-- {detail}' if detail and not ok else '')

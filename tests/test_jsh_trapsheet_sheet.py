@@ -169,6 +169,21 @@ eq("a pass that never touches down is left whole",
    len(sheet.trim_touchdown(AIR)), len(AIR))
 eq("an empty pass stays empty", sheet.trim_touchdown([]), [])
 
+# --------------------------------------------------------------- details
+eq("the LSO comment after the grade, without the wire",
+   sheet.details_of("LSO: GRADE:C :  _LOIC_  _LOAR_  WIRE# 2 _EGIW_ [BC]"),
+   "_LOIC_ _LOAR_ _EGIW_ [BC]")
+eq("a no-count's prose survives details_of",
+   sheet.details_of("LSO: GRADE: NC : No proper communications"),
+   "No proper communications")
+eq("mission clock as hh:mm:ss", sheet.clock_text(10 * 3600 + 56 * 60 + 44), "10:56:44")
+eq("a clock past midnight wraps", sheet.clock_text(86400 + 61), "00:01:01")
+eq("no clock, no text", sheet.clock_text(None), None)
+eq("CVN_72 is the Lincoln, per AIRBOSS", sheet.CARRIERS['CVN_72'], 'Lincoln')
+eq("prose is passed through, not decoded into letters",
+   sheet.decode("No proper communications", {'N': 'Nose', 'O': 'x'}, {'IC': 'In close'}),
+   [('Overall', ['No proper communications'])])
+
 # ------------------------------------------------------------ presentation
 eq("a graded pass shows the grade and what it means",
    sheet.grade_line('_OK_'), '**_OK_** \u2014 Unicorn \u2014 a perfect pass')

@@ -48,6 +48,23 @@ eq("(OK) survives the character class",
    sheet.grade_of("LSO: GRADE:(OK): WIRE# 2"), '(OK)')
 eq("a bolter has no wire", sheet.wire_of("LSO: GRADE:B: LOIM"), None)
 
+# Verbatim from dcs.log, Foothold Alpha, 2026-11-06 09:53:38, the first live
+# trap after deploying. The grade did not parse: the old pattern listed the
+# allowed characters and `N` was not one of them.
+LIVE = "LSO: GRADE: NC : No proper communications"
+eq("the first live grade parses -- a no-count, with a space after GRADE:",
+   sheet.grade_of(LIVE), 'NC')
+eq("a no-count has no wire", sheet.wire_of(LIVE), None)
+eq("a no-count scores nothing", sheet.points_of('NC'), 0.0)
+
+# greenieboard rewrites these before storing. The attach matches its row on
+# the grade, so ours must be rewritten identically, or it never finds the row
+# and inserts a second one.
+for raw, stored in [('OWO', 'NC'), ('WOP', 'NC'), ('TWO', 'NC'),
+                    ('TLU', 'NC'), ('WOFD', 'WO')]:
+    eq(f"{raw} is stored as {stored}, as greenieboard stores it",
+       sheet.grade_of(f"LSO: GRADE:{raw} : something"), stored)
+
 # The legacy-deck case: no comment at all.
 eq("no comment yields no grade", sheet.grade_of(''), None)
 eq("no comment yields no wire", sheet.wire_of(''), None)

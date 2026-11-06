@@ -73,28 +73,40 @@ AOA_CODES = ('FA-18', 'EA-18', 'T-45', 'F-14A-135-GR', 'F-14B', 'AV8BNA', 'A-4E-
 #: Matches DCSServerBot's own mapping in greenieboard/db/tables.sql, so a row
 #: we write scores the same as a row the bot wrote.
 POINTS = {
-    '_OK_': 5.0, 'OK': 4.0, '(OK)': 3.0, 'B': 2.5,
-    '--': 2.0, 'OWO': 2.0, 'WOP': 2.0,
-    'WO': 1.0, 'LIG': 1.0, 'C': 0.0,
+    '_OK_': 5.0, 'OK': 4.0, '(OK)': 3.0, 'B': 2.5, '--': 2.0,
+    'WO': 1.0, 'C': 0.0, 'NC': 0.0,
 }
+"""Ratings from greenieboard's const.GRADES, used only when greenieboard wrote
+no row of its own. When it did, its points stand and these are never read."""
 
-#: Same character class the bot's own migration uses to pull the grade out.
-_GRADE = re.compile(r'GRADE:\s*([_()\-BCKOW]{1,4})')
+#: Any grade token, as greenieboard's get_element() takes it, but tolerating
+#: the space DCS puts after the colon on some grades -- seen live:
+#: `LSO: GRADE: NC : No proper communications`. An earlier version listed the
+#: allowed characters instead, copying the bot's old migration, and `N` was
+#: not among them: a no-count simply did not parse.
+_GRADE = re.compile(r'GRADE:\s*([^:\s]+)')
 _WIRE = re.compile(r'WIRE#\s*([1-4])')
+
+#: greenieboard rewrites these before storing (listener.py, process_lso_event).
+#: The attach matches greenieboard's row ON THE GRADE, so ours must be
+#: rewritten identically -- otherwise an OWO looks for 'OWO', never finds the
+#: 'NC' row greenieboard wrote, and falls back to inserting a second one.
+ALIASES = {'WOP': 'NC', 'OWO': 'NC', 'TWO': 'NC', 'TLU': 'NC', 'WOFD': 'WO'}
 
 
 def grade_of(comment: str) -> Optional[str]:
     """The LSO grade from a DCS landing-quality comment, or None.
 
-    `---` is normalised to `--`, exactly as the bot does, so a no-grade from
-    us and a no-grade from greenieboard are the same string in the database.
+    Normalised exactly as greenieboard normalises it -- `---` to `--`, then
+    the aliases above -- so the grade we match on is the grade it stored.
     """
     if not comment:
         return None
     m = _GRADE.search(comment)
     if not m:
         return None
-    return m.group(1).replace('---', '--')
+    grade = m.group(1).replace('---', '--')
+    return ALIASES.get(grade, grade)
 
 
 def wire_of(comment: str) -> Optional[int]:
@@ -194,17 +206,15 @@ GRADE_TEXT = {
     '--': 'No-grade. Below average but safe',
     'B': 'Bolter',
     'WO': 'Wave-off',
-    'OWO': 'Own wave-off',
-    'WOP': 'Wave-off, pattern',
-    'LIG': 'Long in the groove',
     'C': 'Cut pass — unsafe',
+    'NC': 'No count — the pass was not graded',
 }
 
 #: Embed colour by how the pass went. Green good, amber marginal, red unsafe.
 GRADE_COLOUR = {
     '_OK_': 0x2ECC71, 'OK': 0x2ECC71, '(OK)': 0xF1C40F, '--': 0xE67E22,
-    'B': 0xE67E22, 'OWO': 0xE67E22, 'WOP': 0xE67E22,
-    'WO': 0xE74C3C, 'LIG': 0xE74C3C, 'C': 0xE74C3C,
+    'B': 0xE67E22, 'NC': 0x95A5A6,
+    'WO': 0xE74C3C, 'C': 0xE74C3C,
 }
 
 

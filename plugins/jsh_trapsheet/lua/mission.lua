@@ -45,8 +45,13 @@ local function carriers()
   for _, side in pairs({coalition.side.BLUE, coalition.side.RED}) do
     for _, grp in pairs(coalition.getGroups(side, Group.Category.SHIP) or {}) do
       for _, u in pairs(grp:getUnits() or {}) do
-        if u:isExist() and u:hasAttribute('AircraftCarrier')
-           and wanted(u:getTypeName()) then
+        -- The type prefix is the whole filter. An earlier version also
+        -- checked hasAttribute('AircraftCarrier'), a name that does not
+        -- exist (DCS spells it 'Aircraft Carriers'). It was false for every
+        -- ship, so no deck was ever found and nothing was recorded, without
+        -- a single error. The CVN_ prefix already picks out exactly the
+        -- decks wanted; a second guess only added a way to fail silently.
+        if u:isExist() and wanted(u:getTypeName()) then
           found[#found + 1] = u
         end
       end
@@ -152,6 +157,15 @@ end
 function JT.tick()
   local ok, decks = pcall(carriers)
   if not ok then decks = {} end
+  -- Say what was found, once and whenever it changes, so dcs.log shows at
+  -- a glance whether there is anything to record against. A silent zero is
+  -- how the attribute bug above went unnoticed.
+  if #decks ~= JT.seen then
+    JT.seen = #decks
+    local names = {}
+    for _, d in ipairs(decks) do names[#names + 1] = d:getTypeName() end
+    env.info('[jsh_trapsheet] ' .. #decks .. ' deck(s): ' .. table.concat(names, ', '))
+  end
   if #decks > 0 then
     for _, side in pairs({coalition.side.BLUE, coalition.side.RED}) do
       for _, grp in pairs(coalition.getGroups(side, Group.Category.AIRPLANE) or {}) do
@@ -254,6 +268,7 @@ function JT.handler:onEvent(e)
   end
 end
 
+env.info('[jsh_trapsheet] loaded')
 if not JT.started then
   JT.started = true
   world.addEventHandler(JT.handler)

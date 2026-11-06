@@ -506,3 +506,46 @@ def render(ts: dict, pinfo: dict, trapfile: str, info: Optional[dict] = None) ->
     buf = io.BytesIO()
     fig.savefig(buf, format='png')
     return buf.getvalue()
+
+
+#: Badge text colour by points, as FunkMan's reads: black for nothing, through
+#: red, orange and gold, to green for a pass worth having.
+BADGE_COLOURS = ((4.0, '#27ae60'), (3.0, '#d4a017'), (2.0, '#e67e22'),
+                 (1.0, '#c0392b'), (0.0, '#000000'))
+
+
+def badge_colour(points) -> str:
+    p = float(points or 0)
+    return next(c for floor, c in BADGE_COLOURS if p >= floor)
+
+
+def badge(points, size: float = 36) -> bytes:
+    """
+    The "N PTS" picture for the embed's top-right corner.
+
+    Discord can only put an image there (an embed thumbnail), not styled text,
+    so this draws one: bold points on white, square, which Discord shows with
+    rounded corners. A Figure pyplot never sees, for the same reason as
+    render().
+    """
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    text = f"{float(points or 0):g} PTS"
+    fig = Figure(figsize=(2, 2), dpi=64, facecolor='white')
+    canvas = FigureCanvasAgg(fig)
+    label = fig.text(0.5, 0.5, text, ha='center', va='center',
+                     fontweight='bold', fontsize=size, color=badge_colour(points))
+    # Fit the label to the square by MEASURING it, not by picking a size. The
+    # width of "2.5 PTS" depends on which font matplotlib finds, and that
+    # differs between machines -- it changed in this container when the font
+    # cache was rebuilt, and a size that fitted then ran off both edges after.
+    room = 0.84 * fig.bbox.width
+    for _ in range(3):
+        width = label.get_window_extent(canvas.get_renderer()).width
+        if width <= room:
+            break
+        label.set_fontsize(label.get_fontsize() * room / width)
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', facecolor='white')
+    return buf.getvalue()

@@ -199,6 +199,28 @@ check("an unknown grade still gets a usable colour",
 check("no grade gets the neutral colour, not the good one",
       sheet.colour_of(None) != sheet.colour_of('OK'))
 
+# ---------------------------------------------------------------- badge
+import io as _io  # noqa: E402
+from PIL import Image  # noqa: E402
+
+eq("no points is black, like FunkMan's", sheet.badge_colour(0), '#000000')
+eq("2 points is orange", sheet.badge_colour(2), '#e67e22')
+eq("2.5 points is orange too", sheet.badge_colour(2.5), '#e67e22')
+eq("4 and 5 points are green", {sheet.badge_colour(4), sheet.badge_colour(5)}, {'#27ae60'})
+eq("no points recorded draws as 0", sheet.badge_colour(None), '#000000')
+
+# 90 pt cannot fit 128 px in ANY font, so this fails without the fitting
+# whichever typeface matplotlib happens to pick -- a fixed 36 pt passed or
+# failed here depending on the font cache, which is the bug being guarded.
+for pts in (0, 2.5, 5):
+    im = Image.open(_io.BytesIO(sheet.badge(pts, size=90))).convert('RGB')
+    check(f"badge for {pts} is a 128x128 square", im.size == (128, 128), str(im.size))
+    w, h = im.size
+    edge = [im.getpixel((x, y)) for x in (0, w - 1) for y in range(h)]
+    check(f"badge for {pts}: text fits, both side edges stay white",
+          all(px == (255, 255, 255) for px in edge),
+          "the label runs off the square")
+
 failed = [c for c in checks if not c[1]]
 for label, ok, detail in checks:
     if not ok:

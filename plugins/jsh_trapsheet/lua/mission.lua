@@ -150,14 +150,21 @@ end
 
 -- One sampling tick.
 function JT.tick()
-  local decks = carriers()
+  local ok, decks = pcall(carriers)
+  if not ok then decks = {} end
   if #decks > 0 then
     for _, side in pairs({coalition.side.BLUE, coalition.side.RED}) do
       for _, grp in pairs(coalition.getGroups(side, Group.Category.AIRPLANE) or {}) do
         for _, u in pairs(grp:getUnits() or {}) do
-          if u:isExist() and u:getPlayerName() then
-            JT.sample(u, decks)
-          end
+          -- pcall per unit: a unit can die between isExist() and the
+          -- getPoint() inside sample(), and an error that escapes tick()
+          -- stops DCS rescheduling it -- no more trapsheets until the next
+          -- mission, with one line in dcs.log to show for it.
+          pcall(function()
+            if u:isExist() and u:getPlayerName() then
+              JT.sample(u, decks)
+            end
+          end)
         end
       end
     end

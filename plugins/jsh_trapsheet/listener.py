@@ -132,7 +132,15 @@ class TrapSheetEventListener(EventListener["TrapSheet"]):
             # format has changed under us.
             self.log.warning(f"JSH TrapSheet: could not read a grade out of "
                              f"{comment!r} for {player.name}.")
-        await self.plugin.store(server, player, samples, grade=parsed, comment=comment)
+        # Spawned, not awaited. The bot reads a server's next message only
+        # after every listener has finished with this one
+        # (services/servicebus/service.py, asyncio.wait on all listener
+        # tasks), and store() renders a PNG, may retry the attach for three
+        # seconds, and posts to Discord. Awaiting it here would stall every
+        # other event from this server -- kills, landings, other plugins'
+        # credits -- behind one picture.
+        self._spawn(self.plugin.store(server, player, samples,
+                                      grade=parsed, comment=comment))
 
     async def _expire(self, waiting: dict, key: Key, config: dict, missing: str) -> None:
         """

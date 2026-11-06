@@ -322,6 +322,16 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
                                             f"({info['hull']})" if info.get('hull') else None) if x))
         add("Aircraft", info.get('unit_type'))
         embed.set_image(url="attachment://trapsheet.png")
+        files = [discord.File(io.BytesIO(image), filename='trapsheet.png')]
+        if info.get('points') is not None:
+            # FunkMan's "N PTS" badge, top right. Drawn, because an embed's
+            # top-right corner only takes an image. A failure costs the badge.
+            try:
+                files.append(discord.File(io.BytesIO(sheet.badge(info['points'])),
+                                          filename='points.png'))
+                embed.set_thumbnail(url="attachment://points.png")
+            except Exception as ex:
+                self.log.warning(f"JSH TrapSheet: could not draw the points badge: {ex}")
         where = ' '.join(x for x in (
             f"{info['theatre']}:" if info.get('theatre') else None,
             info.get('date'),
@@ -329,9 +339,7 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
         embed.set_footer(text=' · '.join(x for x in (where, server.name) if x))
 
         try:
-            await channel.send(
-                embed=embed,
-                file=discord.File(io.BytesIO(image), filename='trapsheet.png'))
+            await channel.send(embed=embed, files=files)
         except discord.DiscordException as ex:
             # A posting failure must not lose the pass: it is already stored.
             self.log.warning(f"JSH TrapSheet: could not post {player.name}'s "

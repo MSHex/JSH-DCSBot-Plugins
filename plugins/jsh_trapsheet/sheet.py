@@ -231,6 +231,67 @@ def colour_of(grade: Optional[str]) -> int:
     return GRADE_COLOUR.get(grade or '', 0x95A5A6)
 
 
+#: Height above the deck, in feet, at or below which the jet is on it.
+#: From the first live trap: height falls 1.2 -> 0.4 ft at touchdown and then
+#: sits at -0.4 to -0.6 ft while the jet rolls out in the wires.
+TOUCHDOWN_FT = 0.5
+
+
+def trim_touchdown(points: list) -> list:
+    """
+    The pass up to and including touchdown, and nothing after it.
+
+    The recorder keeps sampling until the jet stops closing on the ship, so a
+    trap ends with a second or two on the deck in the wires. Those samples
+    are not an approach: the nose comes down and the computed AoA falls
+    through zero -- the live trap's trace ran 9.7 -> -3.0 degrees in its last
+    ten samples -- which dragged greenieboard's auto-scaled AoA panel down to
+    fit them. AIRBOSS stops at touchdown; so does this.
+
+    A pass that never touches down (a wave-off, a bolter that never reaches
+    the deck height) is returned unchanged.
+    """
+    for i, p in enumerate(points):
+        if isinstance(p, (list, tuple)) and len(p) >= 3 and float(p[2]) <= TOUCHDOWN_FT:
+            return points[:i + 1]
+    return points
+
+
+#: Colours for the AoA band, as FunkMan draws it: limits red, on-speed green.
+BAND_LIMIT = '#e74c3c'
+BAND_ONSPEED = '#2ecc71'
+
+
+def style_aoa_band(ax) -> bool:
+    """
+    Restyle the on-speed band greenieboard drew, FunkMan fashion.
+
+    greenieboard's plotter draws each airframe's AoA limits as two thin dashed
+    lines in the default colour cycle, and no on-speed line. Its own comments
+    give on-speed as the midpoint (Hornet 7.4 / 8.1 / 8.8, T-45 6.75 / 7.00 /
+    7.25). Rather than copying every airframe's numbers here, the two lines it
+    drew are found and recoloured, and on-speed is added between them -- so
+    each airframe keeps exactly the band greenieboard chose for it.
+
+    Returns False, changing nothing, if it does not find exactly two.
+    """
+    band = []
+    for line in ax.get_lines():
+        y = list(line.get_ydata())
+        if line.get_linestyle() == '--' and len(y) == 2 and y[0] == y[1]:
+            band.append(line)
+    if len(band) != 2:
+        return False
+    for line in band:
+        line.set_color(BAND_LIMIT)
+        line.set_alpha(0.9)
+        line.set_linewidth(1.5)
+    lo, hi = sorted(float(line.get_ydata()[0]) for line in band)
+    ax.plot(band[0].get_xdata(), [(lo + hi) / 2] * 2, color=BAND_ONSPEED,
+            linestyle='--', linewidth=1.5, alpha=0.9)
+    return True
+
+
 def render(ts: dict, pinfo: dict, trapfile: str) -> bytes:
     """
     The trapsheet PNG, drawn by greenieboard's own plotter.
@@ -261,6 +322,7 @@ def render(ts: dict, pinfo: dict, trapfile: str) -> bytes:
     fig.set_size_inches(8, 6)
     axs = fig.subplots(3, 1, sharex=True)
     plot_trapsheet(axs, ts, pinfo, trapfile)
+    style_aoa_band(axs[2])
     buf = io.BytesIO()
     fig.savefig(buf, format='png')
     return buf.getvalue()

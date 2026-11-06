@@ -107,7 +107,9 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
         their picture, instead of there being two boards to look at.
         """
         config = self.get_config(server)
-        points = pass_.get('points') or []
+        # Cut at touchdown: the rollout in the wires is not part of the
+        # approach, and stored, plotted or timed it skews all three.
+        points = sheet.trim_touchdown(pass_.get('points') or [])
         unit_type = pass_.get('unit_type') or player.unit_type or ''
 
         ts = sheet.to_trapsheet(points, config.get('axes'))

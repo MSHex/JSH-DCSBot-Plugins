@@ -95,6 +95,31 @@ check("a board figure created mid-draw in another thread does not replace ours",
       f"got {size} -- that is the board's figure, saved as our trapsheet")
 plt.close('all')
 
+# 3. the AoA band is restyled FunkMan fashion: red limits, green on-speed
+#    at their midpoint -- 7.4 / 8.1 / 8.8 for the Hornet.
+from matplotlib.figure import Figure  # noqa: E402
+fig = Figure(dpi=50)
+axs = fig.subplots(3, 1, sharex=True)
+gb.plot_trapsheet(axs, ts, pinfo, trapfile)
+check("found greenieboard's two band lines", sheet.style_aoa_band(axs[2]))
+levels = sorted({round(float(l.get_ydata()[0]), 2) for l in axs[2].get_lines()
+                 if l.get_linestyle() == '--' and len(l.get_ydata()) == 2})
+check("Hornet band is 7.4 / 8.1 / 8.8 with on-speed added", levels == [7.4, 8.1, 8.8],
+      f"got {levels}")
+check("the limits are red", all(l.get_color() == sheet.BAND_LIMIT for l in axs[2].get_lines()
+      if l.get_linestyle() == '--' and round(float(l.get_ydata()[0]), 2) in (7.4, 8.8)))
+
+# 4. ...and render() actually applies it to the picture it returns.
+seen = []
+real_style = sheet.style_aoa_band
+sheet.style_aoa_band = lambda ax: seen.append(ax) or real_style(ax)
+try:
+    sheet.render(ts, pinfo, trapfile)
+finally:
+    sheet.style_aoa_band = real_style
+check("render() restyles the AoA panel of the picture it returns", len(seen) == 1,
+      "the band would be drawn greenieboard's way, thin and with no on-speed line")
+
 failed = [c for c in checks if not c[1]]
 for label, ok, detail in checks:
     print(('  ok  ' if ok else ' FAIL '), label, f'-- {detail}' if detail and not ok else '')

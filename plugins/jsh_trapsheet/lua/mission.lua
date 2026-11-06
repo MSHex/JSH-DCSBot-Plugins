@@ -238,17 +238,38 @@ function JT.sample(unit, decks)
   end
 end
 
+-- Wind over the deck in knots, as AIRBOSS's GetWindOnDeck() takes it: the
+-- wind at 18 m less the carrier's own velocity, headwind component along the
+-- deck. AIRBOSS measures along the ANGLED deck; this uses the ship's axis,
+-- which differs by cos(9 deg) -- under half a knot at 30 kt.
+local function wod(deck)
+  local c, v, p = deck:getPoint(), deck:getVelocity(), deck:getPosition()
+  local w = atmosphere.getWindWithTurbulence({ x = c.x, y = 18, z = c.z })
+  return -((w.x - v.x) * p.x.x + (w.z - v.z) * p.x.z) * 1.94384
+end
+
 function JT.flush(k)
   local track = JT.tracks[k]
   JT.tracks[k] = nil
   if not track or #track.pts < 10 then return end   -- too short to plot
-  dcsbot.sendBotTable({
+  local msg = {
     command  = 'jshTrapsheet',
     name     = track.name,
     unit_type = track.utype,
     carrier  = track.carrier,
     points   = track.pts,
-  })
+  }
+  -- The details on the picture and in the embed. Each under pcall: a
+  -- missing detail costs one label, never the pass.
+  pcall(function() msg.ctype = track.deck:getTypeName() end)
+  pcall(function() msg.wind = math.floor(wod(track.deck) * 10 + 0.5) / 10 end)
+  pcall(function() msg.theatre = env.mission.theatre end)
+  pcall(function()
+    local d = env.mission.date
+    msg.date = d.Year .. '/' .. d.Month .. '/' .. d.Day
+  end)
+  pcall(function() msg.clock = math.floor(timer.getAbsTime()) end)
+  dcsbot.sendBotTable(msg)
 end
 
 -- A landing or a crash ends a pass immediately, without waiting for the

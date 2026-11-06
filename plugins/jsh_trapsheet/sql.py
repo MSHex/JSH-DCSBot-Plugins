@@ -32,24 +32,31 @@ bare now() would be off by the database session's UTC offset, which would
 quietly widen or close the window by hours.
 """
 
-#: Attach a trapsheet to greenieboard's row for this pass. RETURNING id, so
-#: the caller can tell whether it found one.
-ATTACH = """
+#: Find greenieboard's row for this pass, and read its own verdict -- points,
+#: case and day/night -- which the picture and embed then show, so they always
+#: agree with /traps and the board. Split from SET because the picture needs
+#: those values before it can be drawn.
+FIND = """
+    SELECT id, points, trapcase, night
+      FROM traps
+     WHERE player_ucid = %(ucid)s
+       AND mission_id  = %(mission_id)s
+       AND grade       = %(grade)s
+       AND trapsheet IS NULL
+       AND time > (now() AT TIME ZONE 'utc') - %(window)s::interval
+     ORDER BY time DESC, id DESC
+     LIMIT 1
+"""
+
+#: Put the trapsheet on the row FIND returned. `trapsheet IS NULL` again, so
+#: a row can never be given two pictures.
+SET = """
     UPDATE traps
        SET trapsheet = %(image)s,
            trapdata  = %(trapdata)s,
            tgroove   = COALESCE(tgroove, %(tgroove)s)
-     WHERE id = (
-           SELECT id
-             FROM traps
-            WHERE player_ucid = %(ucid)s
-              AND mission_id  = %(mission_id)s
-              AND grade       = %(grade)s
-              AND trapsheet IS NULL
-              AND time > (now() AT TIME ZONE 'utc') - %(window)s::interval
-            ORDER BY time DESC, id DESC
-            LIMIT 1
-            FOR UPDATE)
+     WHERE id = %(id)s
+       AND trapsheet IS NULL
     RETURNING id
 """
 
@@ -62,7 +69,7 @@ INSERT = """
     VALUES (%(mission_id)s, %(ucid)s, %(unit_type)s, %(grade)s, %(comment)s,
             %(place)s, %(case)s, %(wire)s, %(night)s, %(points)s, %(image)s,
             %(trapdata)s, %(tgroove)s)
-    RETURNING id
+    RETURNING id, points, trapcase, night
 """
 
 #: How far back a greenieboard row may be and still be this pass's.

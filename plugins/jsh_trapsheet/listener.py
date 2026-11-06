@@ -83,6 +83,9 @@ class TrapSheetEventListener(EventListener["TrapSheet"]):
             'points': points,
             'unit_type': data.get('unit_type') or '',
             'carrier': data.get('carrier') or '',
+            # Picture and embed details; any of them may be missing.
+            'meta': {k: data.get(k) for k in
+                     ('ctype', 'wind', 'theatre', 'date', 'clock')},
         })
 
     @event(name="onMissionEvent")

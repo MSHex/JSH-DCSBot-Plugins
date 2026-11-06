@@ -6,7 +6,6 @@ import os
 import discord
 import matplotlib
 matplotlib.use('Agg')                      # no display on a headless node
-import matplotlib.pyplot as plt            # noqa: E402
 import psycopg                             # noqa: E402
 
 from core import Plugin, Server, Player, Status          # noqa: E402
@@ -96,144 +95,169 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
         await server.send_to_dcs(message)
         self.log.debug(f"JSH TrapSheet: sampler injected into {server.name} ({size} bytes)")
 
-    # ----------------------------------------------------------------- drawing
-    @staticmethod
-    def render(ts: dict, pinfo: dict, trapfile: str) -> bytes:
-        """
-        The trapsheet PNG, drawn by greenieboard's own plotter.
-
-        `trapfile` is a synthetic name, never a real path -- the plotter opens
-        nothing, it only substring-matches the stem to choose the AoA
-        reference band. See sheet.trapfile_name().
-
-        Imported here rather than at module level: greenieboard is a stock
-        plugin and always present, but a module-level import would make this
-        plugin fail to LOAD rather than fail to draw if that ever stopped
-        being true, and a missing picture is a far better outcome than a
-        plugin that will not start.
-        """
-        from plugins.greenieboard.trapsheet import plot_trapsheet
-
-        fig, axs = plt.subplots(3, 1, sharex=True, facecolor="#404040", dpi=150)
-        fig.set_size_inches(8, 6)
-        try:
-            plot_trapsheet(axs, ts, pinfo, trapfile)
-            buf = io.BytesIO()
-            plt.savefig(buf, format='png')
-            return buf.getvalue()
-        finally:
-            plt.close(fig)
-
     # ------------------------------------------------------------------- store
+    @staticmethod
+    def _greenieboard_tables() -> tuple[dict, dict, dict]:
+        """
+        greenieboard's GRADES, ERRORS and DISTANCE_MARKS, so our wording and
+        legends match /traps exactly. Imported here, not at module level, for
+        the same reason as the plotter: a missing table should cost words, not
+        stop the plugin loading. const.py imports nothing.
+        """
+        try:
+            from plugins.greenieboard.const import GRADES, ERRORS, DISTANCE_MARKS
+            return GRADES, ERRORS, DISTANCE_MARKS
+        except Exception:
+            return {}, {}, {}
+
     async def store(self, server: Server, player: Player, pass_: dict,
                     grade: str | None, comment: str) -> None:
         """
-        Draw the pass and write it to greenieboard's `traps` table.
+        Draw the pass, put it on greenieboard's row, and post it.
 
-        Writing there rather than to a table of our own is deliberate: the
-        existing /greenieboard and /traps commands then show these passes with
-        their picture, instead of there being two boards to look at.
+        Order matters. greenieboard's row is FOUND first, because the picture
+        and the embed show greenieboard's own verdict on the pass -- its
+        points, case and day or night -- so they always agree with /traps and
+        the board. Then the picture is drawn, then SET on that same row.
         """
         config = self.get_config(server)
-        points = pass_.get('points') or []
-        unit_type = pass_.get('unit_type') or player.unit_type or ''
+        grades, errors, marks = self._greenieboard_tables()
+        meta = pass_.get('meta') or {}
 
-        ts = sheet.to_trapsheet(points, config.get('axes'))
-        pinfo = {
-            'aircraft': sheet.aircraft_label(unit_type),
+        # Cut at touchdown: the rollout in the wires is not part of the
+        # approach, and stored, plotted or timed it skews all three.
+        points = sheet.trim_touchdown(pass_.get('points') or [])
+        unit_type = pass_.get('unit_type') or player.unit_type or ''
+        tgroove = sheet.groove_time(points, float(config.get('sample_rate', 0.1)))
+        wire = sheet.wire_of(comment)
+        details = sheet.details_of(comment)
+
+        # greenieboard's verdict, or our own if it wrote no row.
+        row = await self._find(server, player, grade) if grade else None
+        if row:
+            row_id, score, case, night = row
+        else:
+            row_id = None
+            night = self._night(server, meta.get('clock'))
+            case = 3 if night else 1
+            score = sheet.points_of(grade)
+
+        now = datetime.now(timezone.utc)
+        info = {
             'callsign': player.name,
-            'time': datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+            'unit_type': unit_type,
+            'legend': (grades.get(grade) or {}).get('legend') or grade,
+            'points': score,
+            'details': details,
+            'carrier_name': sheet.CARRIERS.get(meta.get('ctype') or ''),
+            'hull': meta.get('ctype'),
+            'case': case,
+            'wind': meta.get('wind'),
+            'wire': wire,
+            'tgroove': tgroove,
+            'theatre': meta.get('theatre'),
+            'date': meta.get('date'),
+            'clock': sheet.clock_text(meta.get('clock')),
+            'now': now.strftime('%Y-%b-%d (%H:%M:%S)'),
         }
 
         # The plotter has no fallback branch for an unknown airframe: it would
         # get partway through the AoA panel and raise on an unbound `xmax`.
         # Checked here so an unsupported type costs the picture, not the pass.
+        image = None
         if sheet.plot_key(unit_type) is None:
             self.log.info(f"JSH TrapSheet: {unit_type or 'unknown type'} has no AoA "
                           f"reference in greenieboard's plotter, so {player.name}'s "
                           f"pass is stored without a trapsheet image.")
-            image = None
         else:
+            pinfo = {'aircraft': sheet.aircraft_label(unit_type),
+                     'callsign': player.name,
+                     'time': now.strftime("%Y-%m-%d %H:%M:%S")}
             try:
                 image = await asyncio.to_thread(
-                    self.render, ts, pinfo,
-                    sheet.trapfile_name(unit_type, player.name))
+                    sheet.render, sheet.to_trapsheet(points, config.get('axes')),
+                    pinfo, sheet.trapfile_name(unit_type, player.name), info)
             except Exception as ex:
                 self.log.warning(f"JSH TrapSheet: could not plot the pass for "
                                  f"{player.name}: {ex}")
-                image = None
 
-        tgroove = sheet.groove_time(points, float(config.get('sample_rate', 0.1)))
-        wire = sheet.wire_of(comment)
-        trapdata = Jsonb({'points': points, 'source': 'jsh_trapsheet'})
-
-        if grade is None:
-            # Nothing to match greenieboard's row on, and inserting our own
-            # would risk the double row ATTACH exists to prevent. Post the
-            # picture, keep the database as greenieboard left it.
-            row = None
+        trapdata = Jsonb({'points': points, 'source': 'jsh_trapsheet', 'meta': meta})
+        if row_id is not None:
+            written = await self._set(row_id, image, trapdata, tgroove)
+        elif grade is not None:
+            written = await self._insert(server, player, unit_type, grade, comment,
+                                         pass_.get('carrier') or '', wire, case,
+                                         night, score, image, trapdata, tgroove)
         else:
-            row = await self._attach(server, player, grade, image, trapdata, tgroove)
-            if row is None:
-                row = await self._insert(server, player, unit_type, grade, comment,
-                                         pass_.get('carrier') or '', wire,
-                                         image, trapdata, tgroove)
+            # Nothing to match greenieboard's row on, and inserting our own
+            # would risk the double row FIND exists to prevent. Post the
+            # picture, keep the database as greenieboard left it.
+            written = None
 
         self.log.info(f"JSH TrapSheet: {player.name} on {server.name}, "
                       f"{len(points)} samples, grade={grade or 'none'}, "
-                      f"traps row={row if row is not None else 'none'}")
+                      f"traps row={written if written is not None else 'none'}")
 
-        await self.post(server, player, config, image, grade, comment,
-                        pass_.get('carrier') or '', wire, tgroove, unit_type)
+        await self.post(server, player, config, image, grade, info,
+                        sheet.decode(details, errors, marks),
+                        (grades.get(grade) or {}).get('grade'))
 
-    async def _attach(self, server: Server, player: Player, grade: str,
-                      image: bytes | None, trapdata, tgroove) -> int | None:
+    @staticmethod
+    def _night(server: Server, clock) -> bool:
         """
-        Put the trapsheet on greenieboard's own row for this pass.
+        Night as greenieboard reckons it: 20:00 to 06:00 mission time. The
+        recorder's own clock reading at touchdown is used when it is there.
+        """
+        try:
+            if clock is None:
+                mission = server.current_mission
+                clock = int(mission.start_time) + int(mission.mission_time)
+            s = int(clock) % 86400
+            return s > 20 * 3600 or s < 6 * 3600
+        except (TypeError, ValueError, AttributeError):
+            return False
+
+    async def _find(self, server: Server, player: Player, grade: str):
+        """
+        greenieboard's row for this pass: (id, points, case, night), or None.
 
         greenieboard reacts to the same LSO event and nothing orders the two
         plugins, so its row may not be written yet. Retry for a few seconds
         before concluding it never will be -- which is the case when FunkMan
         is enabled in greenieboard.yaml and Super Carrier events are ignored.
         """
-        params = {'image': psycopg.Binary(image) if image else None,
-                  'trapdata': trapdata, 'tgroove': tgroove,
-                  'ucid': player.ucid, 'mission_id': server.mission_id,
+        params = {'ucid': player.ucid, 'mission_id': server.mission_id,
                   'grade': grade, 'window': sql.WINDOW}
-        for attempt in range(ATTACH_TRIES):
+        for _ in range(ATTACH_TRIES):
             async with self.apool.connection() as conn:
-                async with conn.transaction():
-                    cursor = await conn.execute(sql.ATTACH, params)
-                    found = await cursor.fetchone()
+                cursor = await conn.execute(sql.FIND, params)
+                found = await cursor.fetchone()
             if found:
-                return found[0]
+                return found
             await asyncio.sleep(ATTACH_DELAY)
         return None
 
-    async def _insert(self, server: Server, player: Player, unit_type: str,
-                      grade: str, comment: str, carrier: str, wire,
-                      image: bytes | None, trapdata, tgroove) -> int | None:
-        """
-        greenieboard wrote no row for this pass, so write one shaped like its.
+    async def _set(self, row_id: int, image: bytes | None, trapdata, tgroove) -> int | None:
+        async with self.apool.connection() as conn:
+            async with conn.transaction():
+                cursor = await conn.execute(sql.SET, {
+                    'id': row_id, 'image': psycopg.Binary(image) if image else None,
+                    'trapdata': trapdata, 'tgroove': tgroove})
+                found = await cursor.fetchone()
+        return found[0] if found else None
 
-        Day or night is derived the way greenieboard derives it, from mission
-        time -- 20:00 to 06:00 is night, and night is CASE III.
-        """
-        mission = server.current_mission
-        night = False
-        if mission is not None:
-            try:
-                clock = (int(mission.start_time) + int(mission.mission_time)) % 86400
-                night = clock > 20 * 3600 or clock < 6 * 3600
-            except (TypeError, ValueError, AttributeError):
-                pass
+    async def _insert(self, server: Server, player: Player, unit_type: str,
+                      grade: str, comment: str, carrier: str, wire, case: int,
+                      night: bool, score, image: bytes | None, trapdata,
+                      tgroove) -> int | None:
+        """greenieboard wrote no row for this pass, so write one shaped like its."""
         async with self.apool.connection() as conn:
             async with conn.transaction():
                 cursor = await conn.execute(sql.INSERT, {
                     'mission_id': server.mission_id, 'ucid': player.ucid,
                     'unit_type': unit_type, 'grade': grade, 'comment': comment,
-                    'place': carrier, 'case': 3 if night else 1, 'wire': wire,
-                    'night': night, 'points': sheet.points_of(grade),
+                    'place': carrier, 'case': case, 'wire': wire,
+                    'night': night, 'points': score,
                     'image': psycopg.Binary(image) if image else None,
                     'trapdata': trapdata, 'tgroove': tgroove})
                 found = await cursor.fetchone()
@@ -241,16 +265,14 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
 
     # ------------------------------------------------------------------- post
     async def post(self, server: Server, player: Player, config: dict,
-                   image: bytes | None, grade: str | None, comment: str,
-                   carrier: str, wire: int | None, tgroove: float | None,
-                   unit_type: str) -> None:
+                   image: bytes | None, grade: str | None, info: dict,
+                   described: list, meaning: str | None) -> None:
         """
         Put the trapsheet in a Discord channel.
 
         greenieboard posts a one-line text message to the server's events
         channel and never attaches the picture -- the image it stores is only
-        seen if somebody runs /traps. That is the gap this fills: the plot is
-        worth nothing sitting in a BYTEA column nobody queries.
+        seen if somebody runs /traps. That is the gap this fills.
 
         `channel` is optional. Unset means post nothing, which is the right
         default for an instance where this would be noise.
@@ -266,25 +288,45 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
                              f"reachable; the pass was stored but not posted.")
             return
 
-        # The type recorded WITH the pass: by now the pilot may have
-        # changed slot, and player.unit_type would name the wrong airframe.
-        title = f"{player.name} | {sheet.aircraft_label(unit_type)}"
-        if carrier:
-            title += f" | {carrier}"
+        # The type recorded WITH the pass: by now the pilot may have changed
+        # slot, and player.unit_type would name the wrong airframe.
+        case = info.get('case')
+        title = ' | '.join(x for x in (
+            player.name,
+            sheet.aircraft_label(info.get('unit_type') or ''),
+            f"CASE {ROMAN.get(case, case)}" if case else None,
+            'Night' if case == 3 else 'Day' if case else None) if x)
 
-        embed = discord.Embed(title=title, colour=sheet.colour_of(grade))
+        embed = discord.Embed(title=title, colour=sheet.colour_of(grade),
+                              timestamp=datetime.now(timezone.utc))
         embed.add_field(name="LSO Grade",
-                        value=sheet.grade_line(grade), inline=False)
-        if comment:
+                        value=f"**{grade}** — {meaning}" if grade and meaning
+                        else sheet.grade_line(grade), inline=False)
+        if info.get('details'):
             # A backtick in the comment would close the code span early.
             embed.add_field(name="LSO Comment",
-                            value=f"`{comment.replace('`', "'")}`", inline=False)
-        if wire:
-            embed.add_field(name="Wire", value=str(wire), inline=True)
-        if tgroove:
-            embed.add_field(name="Groove", value=f"{tgroove:.1f}s", inline=True)
+                            value=f"`{info['details'].replace('`', "'")}`", inline=False)
+        if described:
+            text = '\n'.join(f"**{where}:** {', '.join(lines)}" for where, lines in described)
+            embed.add_field(name="LSO Comment Description", value=text[:1024], inline=False)
+
+        def add(name, value):
+            if value not in (None, ''):
+                embed.add_field(name=name, value=str(value), inline=True)
+
+        add("Points", f"{float(info['points']):g}" if info.get('points') is not None else None)
+        add("Wire", info.get('wire'))
+        add("Groove", f"{info['tgroove']:.1f}s" if info.get('tgroove') else None)
+        add("Wind", f"{float(info['wind']):.0f} kn" if info.get('wind') is not None else None)
+        add("Carrier", ' '.join(x for x in (info.get('carrier_name'),
+                                            f"({info['hull']})" if info.get('hull') else None) if x))
+        add("Aircraft", info.get('unit_type'))
         embed.set_image(url="attachment://trapsheet.png")
-        embed.set_footer(text=server.name)
+        where = ' '.join(x for x in (
+            f"{info['theatre']}:" if info.get('theatre') else None,
+            info.get('date'),
+            f"({info['clock']})" if info.get('clock') else None) if x)
+        embed.set_footer(text=' · '.join(x for x in (where, server.name) if x))
 
         try:
             await channel.send(
@@ -294,6 +336,9 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
             # A posting failure must not lose the pass: it is already stored.
             self.log.warning(f"JSH TrapSheet: could not post {player.name}'s "
                              f"pass to {channel_id}: {ex}")
+
+
+ROMAN = {1: 'I', 2: 'II', 3: 'III'}
 
 
 async def setup(bot: DCSServerBot):

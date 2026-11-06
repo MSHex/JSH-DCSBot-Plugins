@@ -82,9 +82,25 @@ against a real PostgreSQL built from greenieboard's own `tables.sql` in
 
 ### Posting
 
-Set `channel` to a Discord channel id and the trapsheet is posted there as
-an embed: grade and what it means, the LSO comment, wire, groove time, and
-the plot itself. Leave it out and nothing is posted.
+Set `channel` to a Discord channel id and the trapsheet is posted there.
+Leave it out and nothing is posted.
+
+The post: pilot, airframe, case and day or night in the title; the grade and
+what it means; the raw LSO comment and the same comment in words, grouped by
+where on the approach it applied ("In close: Low (a lot!)"); points, wire,
+groove time, wind over deck, carrier and airframe; the map and mission date
+and time in the footer.
+
+The picture carries the same details as FunkMan's: pilot, airframe, grade,
+points and comment across the top; carrier, hull, case, wind, wire and groove
+time in a box top right; map and mission date bottom left; real date bottom
+right.
+
+Points, case and day or night are **greenieboard's own**, read back from its
+row, so the post and the picture always agree with `/traps`. The comment is
+decoded with greenieboard's own tables, so the wording matches too. The map,
+mission date and time, carrier type and wind over deck are read mission-side
+at touchdown; wind is taken as AIRBOSS takes it, at 18 m along the deck.
 
 This is worth having because **greenieboard never posts the picture**. Its
 `send_chat_message()` puts a one-line text message in the server's events

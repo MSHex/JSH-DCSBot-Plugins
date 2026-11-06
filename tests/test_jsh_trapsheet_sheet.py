@@ -149,6 +149,41 @@ eq("samples outside the wake do not count",
 eq("no samples yields no groove time", sheet.groove_time([], 0.1), None)
 eq("a zero rate cannot divide anything", sheet.groove_time(inside, 0), None)
 
+# ------------------------------------------------------------ touchdown
+# The last 16 samples of the first live trap (row 36), verbatim: touchdown at
+# 72.5 m and 0.4 ft, then the rollout in the wires at -0.5 ft while the nose
+# comes down and the computed AoA falls through zero.
+TAIL = [[78, -7.3, 1.2, 9.73], [72.5, -8.1, 0.4, 9.65], [67, -8.9, 0.1, 9.52],
+        [61.6, -9.7, 0, 9.34], [56.1, -10.5, -0.2, 8.89], [50.7, -11.3, -0.5, 8.21],
+        [45.4, -12.1, -0.6, 7.21], [40.1, -12.8, -0.5, 5.95], [35, -13.5, -0.4, 4.6],
+        [30, -14.2, -0.4, 3.35], [25.2, -14.8, -0.5, 2.08], [20.7, -15.4, -0.6, 1.02],
+        [16.4, -16, -0.6, -0.01], [12.4, -16.5, -0.6, -0.83], [8.7, -17, -0.6, -1.58],
+        [0, -18.3, -0.6, -3.04]]
+AIR = [[1800 - i * 10, 0.0, 400 - i * 2.0, 8.1] for i in range(150)]
+cut = sheet.trim_touchdown(AIR + TAIL)
+eq("the trace ends at touchdown, the first sample at or below 0.5 ft",
+   cut[-1], [72.5, -8.1, 0.4, 9.65])
+check("no rollout sample survives -- the AoA no longer falls through zero",
+      min(p[3] for p in cut) > 6, f"min AoA kept {min(p[3] for p in cut)}")
+eq("a pass that never touches down is left whole",
+   len(sheet.trim_touchdown(AIR)), len(AIR))
+eq("an empty pass stays empty", sheet.trim_touchdown([]), [])
+
+# --------------------------------------------------------------- details
+eq("the LSO comment after the grade, without the wire",
+   sheet.details_of("LSO: GRADE:C :  _LOIC_  _LOAR_  WIRE# 2 _EGIW_ [BC]"),
+   "_LOIC_ _LOAR_ _EGIW_ [BC]")
+eq("a no-count's prose survives details_of",
+   sheet.details_of("LSO: GRADE: NC : No proper communications"),
+   "No proper communications")
+eq("mission clock as hh:mm:ss", sheet.clock_text(10 * 3600 + 56 * 60 + 44), "10:56:44")
+eq("a clock past midnight wraps", sheet.clock_text(86400 + 61), "00:01:01")
+eq("no clock, no text", sheet.clock_text(None), None)
+eq("CVN_72 is the Lincoln, per AIRBOSS", sheet.CARRIERS['CVN_72'], 'Lincoln')
+eq("prose is passed through, not decoded into letters",
+   sheet.decode("No proper communications", {'N': 'Nose', 'O': 'x'}, {'IC': 'In close'}),
+   [('Overall', ['No proper communications'])])
+
 # ------------------------------------------------------------ presentation
 eq("a graded pass shows the grade and what it means",
    sheet.grade_line('_OK_'), '**_OK_** \u2014 Unicorn \u2014 a perfect pass')

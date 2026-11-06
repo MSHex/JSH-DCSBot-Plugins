@@ -80,6 +80,16 @@ Both are covered by `tests/test_plugin_packaging.py`. Run it before tagging.
   false. Don't test it; DCS registering means DCS is there.
 - **`asyncio.create_task` with no retained reference can be garbage-collected
   before it runs.** Keep a `_tasks` set with `add_done_callback(discard)`.
+- **Never draw through pyplot's current figure.** `plt.savefig()` saves the
+  process-wide *current* figure, and the bot's report framework
+  (`core/report/elements.py`) creates pyplot figures in other threads all the
+  time. `jsh_trapsheet`'s first live trap stored greenieboard's blank
+  3048×1350 board figure instead of the trapsheet, because the trap had just
+  triggered a board redraw. Build a `matplotlib.figure.Figure` directly and
+  call `fig.savefig()`. `tests/trapsheet_render_check.py` races it.
+- **A listener that does slow work holds up the whole server.** The bot reads
+  a server's next message only after every listener has finished the current
+  one (`asyncio.wait` on all of them, 60 s). Spawn the work, don't await it.
 
 ### greenieboard owns the `traps` row
 

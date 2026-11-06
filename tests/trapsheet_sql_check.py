@@ -8,7 +8,7 @@ creates, not one written to suit the query.
 The case that matters most is the first one. greenieboard writes its own
 row for every Super Carrier grade. An earlier version of this plugin
 INSERTed a second, so every graded pass counted twice on the board at two
-different scores. ATTACH must leave exactly one row.
+different scores. FIND then SET must leave exactly one row.
 
     python3 -I tests/trapsheet_sql_check.py <dsn> <path to greenieboard tables.sql>
 """
@@ -52,11 +52,19 @@ def bind(query: str, params: dict) -> str:
     return re.sub(r'%\((\w+)\)s', lambda m: literal(params[m.group(1)]), query)
 
 
+def find(ucid='U1', mission=1, grade='OK', prefix='') -> str:
+    """FIND, as store() runs it: 'id|points|trapcase|night', or ''."""
+    return run(prefix + bind(sql.FIND, {'ucid': ucid, 'mission_id': mission,
+                                        'grade': grade, 'window': sql.WINDOW}))
+
+
 def attach(ucid='U1', mission=1, grade='OK', image='\\x89504e47') -> str:
-    return run(bind(sql.ATTACH, {
-        'image': image, 'trapdata': '{"points": []}', 'tgroove': 17.9,
-        'ucid': ucid, 'mission_id': mission, 'grade': grade,
-        'window': sql.WINDOW}))
+    """FIND then SET, exactly the order store() uses. The id SET wrote, or ''."""
+    found = find(ucid, mission, grade)
+    if not found:
+        return ''
+    return run(bind(sql.SET, {'id': int(found.split('|')[0]), 'image': image,
+                              'trapdata': '{"points": []}', 'tgroove': 17.9}))
 
 
 def greenieboard_row(ucid='U1', mission=1, grade='OK', ago='0 seconds',
@@ -100,7 +108,7 @@ check("built traps from greenieboard's own tables.sql",
 reset()
 gb = greenieboard_row()
 got = attach()
-check("ATTACH finds greenieboard's row", got == gb, f"got {got!r}, want {gb!r}")
+check("FIND then SET lands on greenieboard's row", got == gb, f"got {got!r}, want {gb!r}")
 check("and leaves exactly ONE row for the pass", count() == 1,
       f"{count()} rows -- the pass would count twice on the greenieboard")
 check("the picture is on greenieboard's row",
@@ -108,9 +116,20 @@ check("the picture is on greenieboard's row",
 check("greenieboard's own points are left alone",
       run(f"SELECT points FROM traps WHERE id = {gb}") == '4')
 
+# FIND hands back greenieboard's own verdict for the picture and embed.
+reset()
+gb = greenieboard_row()
+verdict = find()
+check("FIND returns greenieboard's points, case and night for this pass",
+      verdict == f"{gb}|4|1|f", f"got {verdict!r}")
+run(f"UPDATE traps SET trapsheet = '\\x00' WHERE id = {gb}")
+check("SET never gives a row a second picture",
+      run(bind(sql.SET, {'id': int(gb), 'image': '\\x01', 'trapdata': '{}',
+                         'tgroove': None})) == '')
+
 # ------------------------------------------------------------------ no row
 reset()
-check("no greenieboard row -> ATTACH finds nothing, so the caller inserts",
+check("no greenieboard row -> FIND finds nothing, so the caller inserts",
       attach() == '')
 
 # --------------------------------------------------- the wrong row is safe
@@ -151,10 +170,7 @@ check("with two candidates, the most recent wins", got == newer,
 # now() would push the window three hours out. Prove the query does not.
 reset()
 greenieboard_row(ago='5 seconds')
-run("SET TIME ZONE 'Asia/Riyadh'")
-got = run("SET TIME ZONE 'Asia/Riyadh';\n" + bind(sql.ATTACH, {
-    'image': '\\x00', 'trapdata': '{}', 'tgroove': None, 'ucid': 'U1',
-    'mission_id': 1, 'grade': 'OK', 'window': sql.WINDOW}))
+got = find(prefix="SET TIME ZONE 'Asia/Riyadh';\n")
 check("the window holds when the session is not in UTC", got != '',
       "a non-UTC session would never find greenieboard's row")
 
@@ -165,7 +181,8 @@ got = run(bind(sql.INSERT, {
     'comment': 'LSO: GRADE:OK: WIRE# 3', 'place': 'CVN_72', 'case': 1, 'wire': 3,
     'night': False, 'points': 4.0, 'image': '\\x00', 'trapdata': '{}',
     'tgroove': 17.9}))
-check("the fallback INSERT satisfies greenieboard's constraints", got == '1')
+check("the fallback INSERT satisfies greenieboard's constraints, and returns its verdict",
+      got == '1|4.0|1|f', f"got {got!r}")
 
 run("DROP TABLE traps; DROP TABLE players;")
 

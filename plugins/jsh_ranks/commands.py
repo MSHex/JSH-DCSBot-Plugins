@@ -5,11 +5,12 @@ import os
 
 from core import Plugin, Group, utils, Server, Status
 from discord import app_commands
+from discord.ext import commands, tasks
 from psycopg.rows import dict_row
 from services.bot import DCSServerBot
 from typing import Optional
 
-from . import grants, slots
+from . import decay, grants, promotions, slots
 from .listener import RanksEventListener
 
 #: One UDP datagram. DCS reads with LuaSocket's 8192-byte default and
@@ -92,6 +93,30 @@ class Ranks(Plugin[RanksEventListener]):
 
     def __init__(self, bot: DCSServerBot, eventlistener=None):
         super().__init__(bot, eventlistener)
+        # officer_roles problems already logged; see reconcile_officer_roles().
+        self._officer_warned: set[str] = set()
+
+    # ------------------------------------------------------------- lifecycle
+    def _decay_config(self) -> Optional[dict]:
+        """rank_decay from DEFAULT, or None when it is off."""
+        cfg = self.get_config().get('rank_decay')
+        if not cfg or not cfg.get('enabled', True):
+            return None
+        return cfg
+
+    async def cog_load(self) -> None:
+        await super().cog_load()
+        # Roles are one Discord, credits one database: on a multi-node setup
+        # every node loads every plugin, so only the master may run the pass.
+        cfg = self._decay_config()
+        if cfg and self.node.master:
+            self.decay_schedule.change_interval(
+                minutes=max(10, int(cfg.get('interval_minutes', 60))))
+            utils.safe_start(self.decay_schedule)
+
+    async def cog_unload(self) -> None:
+        await utils.safe_cancel(self.decay_schedule)
+        await super().cog_unload()
 
     def enabled(self, server: Server) -> bool:
         return bool(self.get_config(server).get('enabled', True))
@@ -163,6 +188,53 @@ class Ranks(Plugin[RanksEventListener]):
         return sorted(
             achievements,
             key=lambda a: a['credits'] if 'credits' in a else a['playtime'])
+
+    def earned_ladder(self) -> list[str]:
+        """
+        Earned rank ROLE names, lowest rung first, from creditsystem.yaml.
+
+        Empty, not an error, if CreditSystem is not loaded: this runs on EVERY
+        role change in the Discord, and an exception there would be logged
+        on each one.
+        """
+        try:
+            achievements = self.achievements()
+        except ValueError:
+            return []
+        return [self._role_name(n) for n in
+                (self._name_of(a) for a in self._sorted(achievements)) if n]
+
+    def _role_name(self, token) -> str:
+        """
+        The Discord role's NAME for a config entry that may be a name or an ID.
+
+        CreditSystem accepts either for an achievement's role, and so does
+        everything here. The ladder is kept as names because the pay-grade
+        code is read out of the name ("Major (O-4)"), and Discord's own name
+        for an ID-configured role still carries it.
+        """
+        role = self.bot.get_role(token)
+        return role.name if role else str(token)
+
+    def _role_id(self, token) -> Optional[str]:
+        """The role's ID as a string, or None if no such role exists."""
+        role = self.bot.get_role(token)
+        return str(role.id) if role else None
+
+    def full_ladder(self) -> list[str]:
+        """
+        Every rank role in order: the earned ladder, then the granted-only
+        ranks by their level. A granted O-10 therefore sits above an earned
+        O-8, which is what lets officer roles follow grants too.
+        """
+        granted = []
+        for key in self.granted_ranks():
+            spec = self.granted_spec(str(key)) or {}
+            granted.append((spec.get('level') or 0, self._role_name(spec.get('role') or key)))
+        ladder = self.earned_ladder()
+        ladder += [role for _, role in sorted(granted, key=lambda g: g[0])
+                   if role not in ladder]
+        return ladder
 
     def rank_name(self, server: Server, credits: int, playtime: float) -> Optional[str]:
         """The pilot's current EARNED rank, or None below the first rung."""
@@ -368,6 +440,92 @@ class Ranks(Plugin[RanksEventListener]):
                        + (f", commanders {commanders}" if commanders else ""))
         return len(levels)
 
+    # ---------------------------------------------------- inactivity decay
+    async def decay_pass(self, dry_run: bool) -> dict:
+        """
+        Lower every member's earned rank role to what their credits and hours
+        still earn. See decay.py for why this can never fight CreditSystem.
+
+        Skipped, never guessed at: members with no linked DCS account, and
+        members holding a grant -- a grant is an admin's decision about that
+        pilot, and not this pass's to second-guess.
+        """
+        cfg = self._decay_config() or {}
+        result = {'checked': 0, 'changes': [], 'problems': [], 'dry_run': dry_run}
+        ladder = self.earned_ladder()
+        achievements = self._sorted(self.achievements())
+        if not ladder or not self.bot.guilds:
+            result['problems'].append("no earned ladder (is CreditSystem loaded?)")
+            return result
+        guild = self.bot.guilds[0]
+        ranked = {m.id: m for m in guild.members
+                  if not m.bot and any(r.name in ladder for r in m.roles)}
+        if not ranked:
+            return result
+        async with self.apool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cursor:
+                await cursor.execute(decay.INPUTS, {
+                    'campaign_id': int(cfg.get('campaign_id', 1)),
+                    'discord_ids': list(ranked)})
+                rows = await cursor.fetchall()
+        by_member: dict[int, list[dict]] = {}
+        for row in rows:
+            by_member.setdefault(int(row['discord_id']), []).append(row)
+        granted = await self.grants_for([r['ucid'] for r in rows])
+
+        for discord_id, accounts in by_member.items():
+            member = ranked[discord_id]
+            if any(a['ucid'] in granted for a in accounts):
+                continue
+            result['checked'] += 1
+            deserved = []
+            for a in accounts:
+                current, _ = get_rank_progress(achievements, int(a['credits'] or 0),
+                                               float(a['playtime'] or 0) / 3600.0)
+                name = self._name_of(current) if current else None
+                deserved.append(self._role_name(name) if name else None)
+            target = decay.best_rank(ladder, deserved)
+            change = decay.demotion(ladder, [r.name for r in member.roles], target)
+            if change is None:
+                continue
+            add, remove = ([r for r in map(self.bot.get_role, names) if r] for names in change)
+            old = decay._highest(ladder, [r.name for r in member.roles])
+            result['changes'].append(f"{member.display_name}: {old} -> {target or 'no rank'}")
+            if dry_run:
+                continue
+            try:
+                # Add first, as CreditSystem does, so a member is never left
+                # with no rank between the two calls.
+                if add:
+                    await member.add_roles(*add,
+                                           reason='JSH Ranks: inactivity decay')
+                if remove:
+                    await member.remove_roles(*remove,
+                                              reason='JSH Ranks: inactivity decay')
+            except discord.Forbidden:
+                result['problems'].append(f"no permission to change {member.display_name}'s "
+                                          f"rank -- the bot's role must sit above the ranks")
+        verb = 'would lower' if dry_run else 'lowered'
+        self.log.info(f"JSH Ranks: decay check: {result['checked']} member(s) checked, "
+                      f"{verb} {len(result['changes'])}"
+                      + ''.join(f"\n  {c}" for c in result['changes']))
+        for problem in result['problems']:
+            self.log.warning(f"JSH Ranks: decay: {problem}")
+        return result
+
+    @tasks.loop(minutes=60)
+    async def decay_schedule(self):
+        cfg = self._decay_config()
+        if cfg:
+            try:
+                await self.decay_pass(dry_run=bool(cfg.get('dry_run', True)))
+            except Exception as ex:
+                self.log.exception(f"JSH Ranks: decay check failed: {ex}")
+
+    @decay_schedule.before_loop
+    async def before_decay_schedule(self):
+        await self.bot.wait_until_ready()
+
     # ------------------------------------------------------------ commands
     ranks = Group(name="ranks", description="Discord ranks inside the mission")
 
@@ -441,6 +599,98 @@ class Ranks(Plugin[RanksEventListener]):
         if ucid:
             return await self.bot.get_member_by_ucid(ucid)
         return None
+
+    # ------------------------------------------- promotions and officer roles
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        """
+        Announce earned rank-ups and keep officer roles in step with rank.
+
+        CreditSystem promotes on disconnect and says nothing; Discord reports
+        the role change, and the new rank's role is ADDED before the old one
+        is removed, so this one update shows both. Our own role changes come
+        back through here too, which is harmless: the officer roles are
+        worked out as a state, so a second pass finds nothing to change.
+        """
+        if after.bot or {r.id for r in before.roles} == {r.id for r in after.roles}:
+            return
+        config = self.get_config()
+        old_names = [r.name for r in before.roles]
+        new_names = [r.name for r in after.roles]
+
+        promoted = promotions.promotion(self.earned_ladder(), old_names, new_names)
+        if promoted:
+            await self._announce(after, *promoted, config.get('promotions') or {})
+
+        if config.get('officer_roles'):
+            await self.reconcile_officer_roles(after)
+
+    async def _announce(self, member: discord.Member, old: str, new: str,
+                        settings: dict) -> None:
+        channel_id = settings.get('channel')
+        if not channel_id:
+            return
+        channel = self.bot.get_channel(int(channel_id))
+        if channel is None:
+            self.log.warning(f"JSH Ranks: promotion channel {channel_id} not found; "
+                             f"{member.display_name}'s rank-up to {new} was not posted.")
+            return
+        text = promotions.message(
+            settings.get('message'), mention=member.mention, name=member.display_name,
+            old_rank=old, new_rank=new,
+            old_code=promotions.code_of(old) or old, new_code=promotions.code_of(new) or new)
+        try:
+            # Mention the pilot only: a template that names a role or
+            # @everyone must not ping the whole server.
+            await channel.send(text, allowed_mentions=discord.AllowedMentions(
+                users=[member], roles=False, everyone=False))
+        except discord.DiscordException as ex:
+            self.log.warning(f"JSH Ranks: could not post {member.display_name}'s "
+                             f"rank-up: {ex}")
+
+    async def reconcile_officer_roles(self, member: discord.Member) -> list[str]:
+        """
+        Give the member exactly the officer roles their highest rank calls
+        for, and take away the rest. Returns problems, for /ranks sync.
+        """
+        raw = self.get_config().get('officer_roles') or {}
+        # A step's KEY may be a code (O-4), a rank name, or a rank role's ID;
+        # an ID becomes that role's name so it can be found on the ladder.
+        keyed = {(self._role_name(k) if self.bot.get_role(k) else str(k)): v
+                 for k, v in raw.items()}
+        # Every role in the steps becomes its ID, so a role named in one step
+        # and given by ID in another is still one role.
+        steps, unresolved = promotions.resolve_steps(keyed, self._role_id)
+        held = [r.name for r in member.roles] + [str(r.id) for r in member.roles]
+        add, remove, unknown = promotions.officer_roles(self.full_ladder(), steps, held)
+        problems = [f"`{key}` in officer_roles matches no rank on the ladder"
+                    for key in unknown]
+        problems += [f"role `{token}` does not exist in Discord" for token in unresolved]
+        for names, action in ((add, 'add'), (remove, 'remove')):
+            for name in names:
+                if name in unresolved:
+                    continue                  # already reported; never acted on
+                role = self.bot.get_role(name)
+                if role is None:
+                    problems.append(f"role `{name}` does not exist in Discord")
+                    continue
+                try:
+                    if action == 'add':
+                        await member.add_roles(role, reason='JSH Ranks: officer role for rank')
+                    else:
+                        await member.remove_roles(role, reason='JSH Ranks: officer role for rank')
+                except discord.Forbidden:
+                    problems.append(f"no permission to {action} `{role.name}` -- the bot's role "
+                                    f"must sit above it")
+        # These are CONFIG problems -- a role that does not exist, a step for
+        # a rank that is not on the ladder -- the same for every member. This
+        # runs on every role change in the Discord, so log each one once, not
+        # once per member per change. /ranks sync still lists them every run.
+        for problem in problems:
+            if problem not in self._officer_warned:
+                self._officer_warned.add(problem)
+                self.log.warning(f"JSH Ranks: officer_roles: {problem}")
+        return problems
 
     async def apply_role(self, member: Optional[discord.Member], rank: str,
                          action: str) -> Optional[str]:
@@ -614,7 +864,7 @@ class Ranks(Plugin[RanksEventListener]):
             f"\n\nThey are back on what they have earned from their next slot change, "
             f"or run `/ranks refresh` now.", ephemeral=True)
 
-    @ranks.command(name='sync', description='Re-apply the Discord role for every granted rank')
+    @ranks.command(name='sync', description='Re-apply granted-rank and officer roles')
     @app_commands.guild_only()
     @utils.app_has_roles(GM_ROLES)
     async def sync(self, interaction: discord.Interaction):
@@ -633,10 +883,6 @@ class Ranks(Plugin[RanksEventListener]):
                 await cursor.execute(
                     'SELECT ucid, discord_id, rank FROM jsh_rank_grants ORDER BY rank')
                 rows = await cursor.fetchall()
-        if not rows:
-            await interaction.followup.send("No ranks have been granted.", ephemeral=True)
-            return
-
         applied = ladder = 0
         problems = []
         for row in rows:
@@ -650,12 +896,45 @@ class Ranks(Plugin[RanksEventListener]):
                 problems.append(f"- {who}: {problem}")
             else:
                 applied += 1
-        lines = [f"Checked {len(rows)} grant(s): {applied} Discord role(s) in place."]
+        lines = [f"Checked {len(rows)} grant(s): {applied} Discord role(s) in place."
+                 if rows else "No ranks have been granted."]
         if ladder:
             lines.append(f"{ladder} are ladder ranks, whose roles belong to CreditSystem "
                          f"and were left alone.")
         if problems:
             lines.append("\n**Could not apply:**\n" + "\n".join(problems[:10]))
+
+        # Officer roles for EVERY member, so pilots who reached O-4 before
+        # this existed get theirs now instead of at their next promotion.
+        if self.get_config().get('officer_roles') and interaction.guild:
+            officer_problems = set()
+            for member in interaction.guild.members:
+                if not member.bot:
+                    officer_problems.update(await self.reconcile_officer_roles(member))
+            lines.append(f"Officer roles checked for {interaction.guild.member_count} member(s).")
+            if officer_problems:
+                lines.append("**Officer roles:**\n" + "\n".join(
+                    f"- {p}" for p in sorted(officer_problems)[:10]))
+        await interaction.followup.send("\n".join(lines)[:1990], ephemeral=True)
+
+    @ranks.command(name='decay', description='Lower rank roles that inactivity decay has taken away')
+    @app_commands.guild_only()
+    @utils.app_has_roles(GM_ROLES)
+    @app_commands.describe(apply='Change roles. Leave off to only list what would change.')
+    async def decay_cmd(self, interaction: discord.Interaction, apply: bool = False):
+        await interaction.response.defer(ephemeral=True)
+        if not self._decay_config():
+            await interaction.followup.send(
+                "`rank_decay` is not configured in jsh_ranks.yaml.", ephemeral=True)
+            return
+        result = await self.decay_pass(dry_run=not apply)
+        head = (f"Checked {result['checked']} ranked member(s). "
+                f"{'Lowered' if apply else 'Would lower'} {len(result['changes'])}:")
+        lines = [head] + [f"- {c}" for c in result['changes'][:25]]
+        if len(result['changes']) > 25:
+            lines.append(f"...and {len(result['changes']) - 25} more (see the bot log).")
+        if result['problems']:
+            lines.append("**Problems:**\n" + "\n".join(f"- {p}" for p in result['problems'][:10]))
         await interaction.followup.send("\n".join(lines)[:1990], ephemeral=True)
 
     @ranks.command(name='grants', description='List every manually assigned rank')

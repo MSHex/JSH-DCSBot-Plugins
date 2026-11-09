@@ -141,6 +141,7 @@ earning access, raise some `ShopRankRequirements` values into the 11–20 range.
 | `/ranks revoke user` | Remove a manually assigned rank |
 | `/ranks grants` | List every manually assigned rank |
 | `/ranks sync` | Re-apply the Discord role for every granted rank |
+| `/ranks decay [apply]` | List rank roles inactivity decay has taken away; `apply:True` lowers them |
 
 ## Granting a rank by hand
 
@@ -344,3 +345,104 @@ call time: at module level it would make `rankstatus` fail to load wherever
 `jsh_ranks` is absent, and it would tie the two packages into an import cycle,
 since `jsh_ranks` already imports `plugins.rankstatus.ranks`. Without
 `jsh_ranks` installed, `rankstatus` simply reports no grant and carries on.
+
+## Rank-up announcements and officer roles
+
+Both are configured in `DEFAULT` -- a rank-up is a Discord event, not tied to
+one server -- and both are off until configured. See the commented examples
+in `config/jsh_ranks.yaml`.
+
+### How a rank-up is seen
+
+CreditSystem promotes a pilot when they disconnect: it adds the new rank's
+Discord role, then removes the lower ones. It posts nothing and raises no
+event. Discord, though, reports every role change, and because the new role
+is ADDED before the old one is removed, that one update shows both ranks.
+`jsh_ranks` listens for it (`on_member_update`); the bot's own `mission` and
+`userstats` plugins rely on the same Discord member updates.
+
+### `promotions`
+
+```yaml
+promotions:
+  channel: 123456789012345678
+  message: "Congratulations {mention}, you ranked up from {old_rank} to {new_rank}!"
+```
+
+Placeholders: `{mention}` `{name}` `{old_rank}` `{new_rank}` `{old_code}`
+`{new_code}` (codes like `E-9`). A template with a mistake falls back to the
+default. Only the pilot is pinged, never a role or `@everyone`.
+
+Announced: an EARNED rank above the highest the pilot held. Not announced: a
+pilot's first rank, ranks re-earned after a campaign reset (which strips every
+rank -- announcing those would flood the channel), demotions, and granted
+ranks.
+
+### `officer_roles`
+
+```yaml
+officer_roles:
+  O-1: {add: [Officer, Junior Officer]}
+  O-4: {add: [Senior Officer], remove: [Junior Officer]}
+  O-7: {add: [General Officer], remove: [Senior Officer]}
+```
+
+Keyed by the code in a rank's name, or the full rank name. The roles are
+worked out from the pilot's highest rank -- every step at or below it, in
+ladder order -- not from the step just crossed. So a pilot who skips a rung
+still passes it, a demotion below O-4 gives Junior Officer back, and a
+campaign reset takes every officer role away. Granted ranks count: an O-10 is
+above O-7 and gets General Officer.
+
+**Names or IDs.** Every role here -- in `officer_roles`, and the rank roles
+in CreditSystem's achievements -- may be a name or a Discord ID, mixed freely.
+They are all resolved to the role's ID before comparing, so a role added by ID
+at O-1 and removed by name at O-4 is still recognised as one role.
+
+**Inactivity decay.** Officer roles follow the RANK role, whenever and however
+it changes -- see `rank_decay` below for making that happen promptly.
+
+The roles must exist in Discord, and the bot's role must sit above them.
+Problems are logged, and listed by `/ranks sync`.
+
+**After enabling, run `/ranks sync` once.** It applies officer roles to every
+member, so pilots who already hold O-4 get Senior Officer now rather than at
+their next promotion.
+
+## Inactivity decay: `rank_decay`
+
+InactivityDecay deducts credits but leaves Discord roles alone. CreditSystem
+only re-checks a pilot's rank when they **disconnect** -- and an inactive pilot
+isn't connecting -- so a pilot decayed from O-6 credits to E-4 credits kept the
+Colonel role, and Senior Officer with it, until they next flew.
+
+```yaml
+DEFAULT:
+  rank_decay:
+    campaign_id: 1          # the campaign InactivityDecay deducts from
+    interval_minutes: 60
+    dry_run: true           # only log; turn off once the log looks right
+```
+
+Every `interval_minutes` the master node lowers each member's rank role to what
+their credits and hours earn now. Officer roles follow by themselves.
+
+It cannot fight CreditSystem:
+
+- **Same inputs** -- the `credits` table for `campaign_id`, and flight hours by
+  CreditSystem's own formula (the campaign's servers, inside its dates).
+- **Same rule** -- the highest achievement met, combined ones included.
+- **Demotions only.** Promotions stay CreditSystem's, on disconnect.
+- **Nothing outside a running campaign**, as CreditSystem does nothing then.
+- **Skipped, never guessed at:** members with no linked DCS account, and
+  members holding a grant. With several linked accounts the best one counts.
+
+Check the campaign first -- `SELECT id, name, start, stop FROM campaigns;` --
+and that it is the one InactivityDecay is configured with. Then watch the log
+for `JSH Ranks: decay check`, or run `/ranks decay` to see the list, before
+setting `dry_run: false`. `/ranks decay apply:True` applies it once on demand.
+
+One deliberate difference: a session the bot left with `hop_off` before
+`hop_on` (see `jsh_statfix`) is skipped rather than counted negative.
+CreditSystem errors on such a row and so never demotes that pilot; counting it
+would demote on hours never lost.

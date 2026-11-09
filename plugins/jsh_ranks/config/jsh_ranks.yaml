@@ -198,6 +198,51 @@ DEFAULT:
   #   '5': NCO
   #   '10': Officer
 
+
+  # ------------------------------------------------------------ rank-ups
+  # Post a message when a pilot EARNS a higher rank -- credits and hours, as
+  # CreditSystem awards it. Granted ranks are not announced, nor is a pilot's
+  # first rank, nor ranks re-earned after a campaign reset (that would flood
+  # the channel after every reset). Leave `channel` out to post nothing.
+  #
+  # Placeholders: {mention} {name} {old_rank} {new_rank} {old_code} {new_code}
+  # promotions:
+  #   channel: 123456789012345678
+  #   message: "Congratulations {mention}, you ranked up from {old_rank} to {new_rank}!"
+
+  # ------------------------------------------------------- officer roles
+  # Extra Discord roles by rank band, keyed by the code in the rank's name.
+  # Each step applies at its rank AND above, in order -- so a pilot who jumps
+  # O-3 to O-5 still passes O-4, a demotion gives the junior role back, and a
+  # campaign reset takes them all away. Granted ranks count: an O-10 is above
+  # O-7. Run /ranks sync once after enabling, to apply it to everyone already
+  # holding a rank.
+  #
+  # Roles may be names or Discord IDs, mixed freely -- a role given by ID in
+  # one step and by name in another is still recognised as the same role.
+  # Pilots demoted by inactivity decay lose these when their RANK ROLE drops,
+  # -- on their next disconnect, or sooner with rank_decay below; a full removal
+  # strips every rank at once, and these with it.
+  # officer_roles:
+  #   O-1:
+  #     add: [Officer, Junior Officer]
+  #   O-4:
+  #     add: [Senior Officer]
+  #     remove: [Junior Officer]
+  #   O-7:
+  #     add: [General Officer]
+  #     remove: [Senior Officer]
+
+  # InactivityDecay lowers credits but leaves Discord rank roles alone until
+  # the pilot next disconnects -- which an inactive pilot does not. This
+  # lowers them on a schedule instead: demotions only, by CreditSystem's own
+  # rule, so the two always agree. Leave dry_run on until the log's
+  # "JSH Ranks: decay check" lines look right. /ranks decay runs it on demand.
+  # rank_decay:
+  #   campaign_id: 1          # the campaign InactivityDecay deducts from
+  #   interval_minutes: 60
+  #   dry_run: true
+
 # ---------------------------------------------------------------- per instance
 # Turn it on only for the Foothold servers:
 #

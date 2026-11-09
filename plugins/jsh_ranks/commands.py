@@ -5,11 +5,12 @@ import os
 
 from core import Plugin, Group, utils, Server, Status
 from discord import app_commands
+from discord.ext import commands
 from psycopg.rows import dict_row
 from services.bot import DCSServerBot
 from typing import Optional
 
-from . import grants, slots
+from . import grants, promotions, slots
 from .listener import RanksEventListener
 
 #: One UDP datagram. DCS reads with LuaSocket's 8192-byte default and
@@ -163,6 +164,35 @@ class Ranks(Plugin[RanksEventListener]):
         return sorted(
             achievements,
             key=lambda a: a['credits'] if 'credits' in a else a['playtime'])
+
+    def earned_ladder(self) -> list[str]:
+        """
+        Earned rank ROLE names, lowest rung first, from creditsystem.yaml.
+
+        Empty, not an error, if CreditSystem is not loaded: this runs on EVERY
+        role change in the Discord, and an exception there would be logged
+        on each one.
+        """
+        try:
+            achievements = self.achievements()
+        except ValueError:
+            return []
+        return [n for n in (self._name_of(a) for a in self._sorted(achievements)) if n]
+
+    def full_ladder(self) -> list[str]:
+        """
+        Every rank role in order: the earned ladder, then the granted-only
+        ranks by their level. A granted O-10 therefore sits above an earned
+        O-8, which is what lets officer roles follow grants too.
+        """
+        granted = []
+        for key in self.granted_ranks():
+            spec = self.granted_spec(str(key)) or {}
+            granted.append((spec.get('level') or 0, spec.get('role') or str(key)))
+        ladder = self.earned_ladder()
+        ladder += [role for _, role in sorted(granted, key=lambda g: g[0])
+                   if role not in ladder]
+        return ladder
 
     def rank_name(self, server: Server, credits: int, playtime: float) -> Optional[str]:
         """The pilot's current EARNED rank, or None below the first rung."""
@@ -442,6 +472,82 @@ class Ranks(Plugin[RanksEventListener]):
             return await self.bot.get_member_by_ucid(ucid)
         return None
 
+    # ------------------------------------------- promotions and officer roles
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        """
+        Announce earned rank-ups and keep officer roles in step with rank.
+
+        CreditSystem promotes on disconnect and says nothing; Discord reports
+        the role change, and the new rank's role is ADDED before the old one
+        is removed, so this one update shows both. Our own role changes come
+        back through here too, which is harmless: the officer roles are
+        worked out as a state, so a second pass finds nothing to change.
+        """
+        if after.bot or {r.id for r in before.roles} == {r.id for r in after.roles}:
+            return
+        config = self.get_config()
+        old_names = [r.name for r in before.roles]
+        new_names = [r.name for r in after.roles]
+
+        promoted = promotions.promotion(self.earned_ladder(), old_names, new_names)
+        if promoted:
+            await self._announce(after, *promoted, config.get('promotions') or {})
+
+        if config.get('officer_roles'):
+            await self.reconcile_officer_roles(after)
+
+    async def _announce(self, member: discord.Member, old: str, new: str,
+                        settings: dict) -> None:
+        channel_id = settings.get('channel')
+        if not channel_id:
+            return
+        channel = self.bot.get_channel(int(channel_id))
+        if channel is None:
+            self.log.warning(f"JSH Ranks: promotion channel {channel_id} not found; "
+                             f"{member.display_name}'s rank-up to {new} was not posted.")
+            return
+        text = promotions.message(
+            settings.get('message'), mention=member.mention, name=member.display_name,
+            old_rank=old, new_rank=new,
+            old_code=promotions.code_of(old) or old, new_code=promotions.code_of(new) or new)
+        try:
+            # Mention the pilot only: a template that names a role or
+            # @everyone must not ping the whole server.
+            await channel.send(text, allowed_mentions=discord.AllowedMentions(
+                users=[member], roles=False, everyone=False))
+        except discord.DiscordException as ex:
+            self.log.warning(f"JSH Ranks: could not post {member.display_name}'s "
+                             f"rank-up: {ex}")
+
+    async def reconcile_officer_roles(self, member: discord.Member) -> list[str]:
+        """
+        Give the member exactly the officer roles their highest rank calls
+        for, and take away the rest. Returns problems, for /ranks sync.
+        """
+        steps = self.get_config().get('officer_roles') or {}
+        add, remove, unknown = promotions.officer_roles(
+            self.full_ladder(), steps, [r.name for r in member.roles])
+        problems = [f"`{key}` in officer_roles matches no rank on the ladder"
+                    for key in unknown]
+        for names, action in ((add, 'add'), (remove, 'remove')):
+            for name in names:
+                role = self.bot.get_role(name)
+                if role is None:
+                    problems.append(f"role `{name}` does not exist in Discord")
+                    continue
+                try:
+                    if action == 'add':
+                        await member.add_roles(role, reason='JSH Ranks: officer role for rank')
+                    else:
+                        await member.remove_roles(role, reason='JSH Ranks: officer role for rank')
+                except discord.Forbidden:
+                    problems.append(f"no permission to {action} `{name}` -- the bot's role "
+                                    f"must sit above it")
+        for problem in problems:
+            self.log.warning(f"JSH Ranks: {member.display_name}: {problem}")
+        return problems
+
     async def apply_role(self, member: Optional[discord.Member], rank: str,
                          action: str) -> Optional[str]:
         """
@@ -614,7 +720,7 @@ class Ranks(Plugin[RanksEventListener]):
             f"\n\nThey are back on what they have earned from their next slot change, "
             f"or run `/ranks refresh` now.", ephemeral=True)
 
-    @ranks.command(name='sync', description='Re-apply the Discord role for every granted rank')
+    @ranks.command(name='sync', description='Re-apply granted-rank and officer roles')
     @app_commands.guild_only()
     @utils.app_has_roles(GM_ROLES)
     async def sync(self, interaction: discord.Interaction):
@@ -633,10 +739,6 @@ class Ranks(Plugin[RanksEventListener]):
                 await cursor.execute(
                     'SELECT ucid, discord_id, rank FROM jsh_rank_grants ORDER BY rank')
                 rows = await cursor.fetchall()
-        if not rows:
-            await interaction.followup.send("No ranks have been granted.", ephemeral=True)
-            return
-
         applied = ladder = 0
         problems = []
         for row in rows:
@@ -650,12 +752,25 @@ class Ranks(Plugin[RanksEventListener]):
                 problems.append(f"- {who}: {problem}")
             else:
                 applied += 1
-        lines = [f"Checked {len(rows)} grant(s): {applied} Discord role(s) in place."]
+        lines = [f"Checked {len(rows)} grant(s): {applied} Discord role(s) in place."
+                 if rows else "No ranks have been granted."]
         if ladder:
             lines.append(f"{ladder} are ladder ranks, whose roles belong to CreditSystem "
                          f"and were left alone.")
         if problems:
             lines.append("\n**Could not apply:**\n" + "\n".join(problems[:10]))
+
+        # Officer roles for EVERY member, so pilots who reached O-4 before
+        # this existed get theirs now instead of at their next promotion.
+        if self.get_config().get('officer_roles') and interaction.guild:
+            officer_problems = set()
+            for member in interaction.guild.members:
+                if not member.bot:
+                    officer_problems.update(await self.reconcile_officer_roles(member))
+            lines.append(f"Officer roles checked for {interaction.guild.member_count} member(s).")
+            if officer_problems:
+                lines.append("**Officer roles:**\n" + "\n".join(
+                    f"- {p}" for p in sorted(officer_problems)[:10]))
         await interaction.followup.send("\n".join(lines)[:1990], ephemeral=True)
 
     @ranks.command(name='grants', description='List every manually assigned rank')

@@ -198,6 +198,35 @@ DEFAULT:
   #   '5': NCO
   #   '10': Officer
 
+
+  # ------------------------------------------------------------ rank-ups
+  # Post a message when a pilot EARNS a higher rank -- credits and hours, as
+  # CreditSystem awards it. Granted ranks are not announced, nor is a pilot's
+  # first rank, nor ranks re-earned after a campaign reset (that would flood
+  # the channel after every reset). Leave `channel` out to post nothing.
+  #
+  # Placeholders: {mention} {name} {old_rank} {new_rank} {old_code} {new_code}
+  # promotions:
+  #   channel: 123456789012345678
+  #   message: "Congratulations {mention}, you ranked up from {old_rank} to {new_rank}!"
+
+  # ------------------------------------------------------- officer roles
+  # Extra Discord roles by rank band, keyed by the code in the rank's name.
+  # Each step applies at its rank AND above, in order -- so a pilot who jumps
+  # O-3 to O-5 still passes O-4, a demotion gives the junior role back, and a
+  # campaign reset takes them all away. Granted ranks count: an O-10 is above
+  # O-7. Run /ranks sync once after enabling, to apply it to everyone already
+  # holding a rank.
+  # officer_roles:
+  #   O-1:
+  #     add: [Officer, Junior Officer]
+  #   O-4:
+  #     add: [Senior Officer]
+  #     remove: [Junior Officer]
+  #   O-7:
+  #     add: [General Officer]
+  #     remove: [Senior Officer]
+
 # ---------------------------------------------------------------- per instance
 # Turn it on only for the Foothold servers:
 #

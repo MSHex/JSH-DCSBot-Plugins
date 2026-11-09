@@ -134,6 +134,62 @@ schema;element_schema:
           range: {min: 1}
           desc: Name shown for this Foothold level.
           example: "Officer"
+    promotions:
+      type: map
+      nullable: false
+      desc: >-
+        Post a message when a pilot EARNS a higher rank through credits and
+        flight hours. Granted ranks are not announced. Read from DEFAULT only:
+        a rank-up is a Discord event, not tied to one server.
+      mapping:
+        channel:
+          type: int
+          nullable: false
+          desc: Discord channel ID to post rank-ups in. Leave out to post nothing.
+          example: "123456789012345678"
+        message:
+          type: str
+          nullable: false
+          range: {min: 1}
+          desc: >-
+            The message. Placeholders: {mention} {name} {old_rank} {new_rank}
+            {old_code} {new_code}. A template with a mistake falls back to the
+            default.
+          example: "Congratulations {mention}, you ranked up from {old_rank} to {new_rank}!"
+    officer_roles:
+      type: map
+      nullable: false
+      desc: >-
+        Extra Discord roles held by rank band, keyed by pay-grade code (O-1)
+        or full rank name. Each step applies at and above its rank, in ladder
+        order, so skipped ranks, demotions and campaign resets all come out
+        right. Granted ranks count. Read from DEFAULT only.
+      mapping:
+        regex;(.+):
+          type: map
+          nullable: false
+          desc: Roles to add and remove from this rank upwards.
+          mapping:
+            add:
+              type: seq
+              nullable: false
+              desc: Discord role names to give from this rank up.
+              example: "Officer"
+              sequence:
+                - type: str
+                  nullable: false
+                  desc: A Discord role name.
+                  example: "Junior Officer"
+            remove:
+              type: seq
+              nullable: false
+              desc: Discord role names to take away from this rank up.
+              example: "Junior Officer"
+              sequence:
+                - type: str
+                  nullable: false
+                  desc: A Discord role name.
+                  example: "Junior Officer"
 
 schema;instance_schema:
   type: map

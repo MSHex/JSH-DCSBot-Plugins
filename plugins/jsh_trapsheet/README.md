@@ -112,21 +112,30 @@ channel; the image it stores is only ever seen by somebody running `/traps`.
 `onMissionLoadEnd`. It ticks at `sample_rate`, and for every player aircraft
 in the groove of a sampled deck records four numbers: distance astern,
 lateral offset, height above the deck, and AoA. When the pass ends —
-touchdown, crash, or leaving the groove — the samples are sent up as
-`jshTrapsheet`.
+the jet stopping in the wires, passing the bow, a crash, or leaving the
+window — the samples are sent up as `jshTrapsheet`.
 
-### What counts as "in the groove"
+### Where a pass starts and ends
 
-Inside `capture_range_nm` and `capture_ceiling_ft`, astern of the ship, and
-**closing on it** at more than 5 m/s along its axis.
+Both follow MOOSE's AIRBOSS, checked against `Airboss.lua`:
 
-The closing test is what keeps the downwind leg out. The downwind runs about
-1.2 NM abeam at 600 ft — inside any sensible capture window — but flown the
-opposite way to the ship, so it closes at a strongly negative rate. Closing
-turns positive past the 90° point, which is where AIRBOSS starts recording
-too (its `Final` step). Without it the downwind and the whole 180 turn would
-fold back over the groove on the plot. The 5 m/s floor means an aircraft
-stopped in the wires reads as not closing, and the pass ends.
+| | AIRBOSS | jsh_trapsheet |
+| --- | --- | --- |
+| Case I/II start | at the **wake**: `_Wake()` moves to `FINAL` once Z ≥ 0 | astern, at or starboard of the ship's axis, inside `capture_range_nm` |
+| Case III start | `_Bullseye()`: a 1 NM zone 3 NM astern, so up to 4 NM | a **descending** straight-in near the approach line, inside `straight_in_nm` |
+| Trap end | touchdown | touchdown — the rollout in the wires is cut off by the bot |
+| Bolter / wave-off end | passing the **bow** (`_Groove()` debriefs there) | passing the bow |
+
+Throughout, the aircraft must be below `capture_ceiling_ft` and **closing on
+the ship** at more than 5 m/s along its axis. That keeps the downwind leg and
+the 180 out: they are flown away from the ship. It also ends a trap, since a
+jet stopped in the wires is no longer closing. The recorder does not know the
+recovery case, so a Case III approach is recognised by its shape: astern,
+descending, and near the approach line. An overhead initial is level, so it
+is not mistaken for one.
+
+AIRBOSS samples every 0.5 s by default; this samples every 0.1 s, so the
+lines are smoother but no different.
 
 A pass is locked to its deck once it starts, so a second carrier nearby
 cannot steal it mid-groove.
@@ -238,9 +247,10 @@ See `config/jsh_trapsheet.yaml`. Sections key on the **instance** name from
 | --- | --- | --- |
 | `enabled` | `true` | Sample approaches on this instance |
 | `sample_rate` | `0.1` | Seconds between samples |
-| `capture_range_nm` | `1.5` | Start sampling inside this range of the deck |
-| `capture_ceiling_ft` | `1500` | Only sample below this height above the deck |
-| `max_points` | `600` | Cap per pass, so a go-around cannot grow unbounded |
+| `capture_range_nm` | `1.5` | Case I/II: start at the wake inside this range |
+| `straight_in_nm` | `4.0` | Case III: start a descending straight-in inside this range |
+| `capture_ceiling_ft` | `2000` | Only sample below this height above the deck |
+| `max_points` | `1200` | Cap per pass, so a go-around cannot grow unbounded |
 | `carrier_types` | `CVN_` | Deck type-name **prefixes** to sample |
 | `grade_wait` | `20` | Seconds to wait for an LSO grade before discarding the pass |
 | `axes.invert_x` | `false` | Flip if the approach plots back to front |

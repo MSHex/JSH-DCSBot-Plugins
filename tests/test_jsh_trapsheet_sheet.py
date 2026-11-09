@@ -168,6 +168,12 @@ check("no rollout sample survives -- the AoA no longer falls through zero",
 eq("a pass that never touches down is left whole",
    len(sheet.trim_touchdown(AIR)), len(AIR))
 eq("an empty pass stays empty", sheet.trim_touchdown([]), [])
+DEPART = [[-10 - i * 15, -1.0 * i, 0.5 + i * 0.8, 8.0] for i in range(12)]
+eq("a BOLTER is drawn whole, to the bow, as AIRBOSS records it",
+   sheet.plotted(AIR + TAIL[:2] + DEPART, 'B'), AIR + TAIL[:2] + DEPART)
+eq("...while any other grade is cut at touchdown",
+   sheet.plotted(AIR + TAIL, 'OK'), cut)
+eq("an ungraded pass is cut at touchdown too", sheet.plotted(AIR + TAIL, None), cut)
 
 # --------------------------------------------------------------- details
 eq("the LSO comment after the grade, without the wire",

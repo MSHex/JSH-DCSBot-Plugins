@@ -245,6 +245,12 @@ them — see `jsh_ranks/slots.py` and `battlegroundbridge/domain.py`.
 - **Test SQL against a real PostgreSQL before pointing it at the live
   database.** Spin one up in the container. Several queries that looked
   obviously right were not.
+- **Mutation-test with `python3 -B`, or delete `__pycache__` between runs.**
+  Python trusts a cached `.pyc` while the source's size and mtime match. A
+  `sed` mutation of the same length, restored with `cp` in the same second,
+  leaves the MUTATED bytecode looking fresh: the restored file then "fails",
+  or a mutation "passes". It produced a false diagnosis here once -- a
+  font-cache theory for a badge overflow that was really a stale 60 pt `.pyc`.
 - **Prove a test fails without the fix.** Twice, an assertion was correct and
   the *fixture* didn't contain the pathology, so the bug shipped anyway. A
   test that has never been seen to fail is worth little.

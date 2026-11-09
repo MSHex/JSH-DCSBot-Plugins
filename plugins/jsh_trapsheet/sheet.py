@@ -506,3 +506,64 @@ def render(ts: dict, pinfo: dict, trapfile: str, info: Optional[dict] = None) ->
     buf = io.BytesIO()
     fig.savefig(buf, format='png')
     return buf.getvalue()
+
+
+#: Badge text colour by grade: greenieboard's own board colours
+#: (plugins/greenieboard/const.py GRADES), so the badge matches the board.
+#: Two are ours: greenieboard gives a perfect pass no colour (it draws a
+#: unicorn instead), so gold; and it gives a no-count white, which would
+#: vanish on the badge's white square, so grey.
+BADGE_COLOURS = {
+    '_OK_': '#d4af37',
+    'OK': '#29c248',
+    '(OK)': '#f2c038',
+    'B': '#088199',
+    '--': '#73481d',
+    'WO': '#000000',
+    'C': '#cc0000',
+    'NC': '#7f8c8d',
+}
+
+#: When the grade is unknown, the same colours keyed by the points each grade
+#: scores. 0 means a cut here; a no-count is only told apart by its grade.
+_BY_POINTS = ((5.0, '_OK_'), (4.0, 'OK'), (3.0, '(OK)'), (2.5, 'B'),
+              (2.0, '--'), (1.0, 'WO'), (0.0, 'C'))
+
+
+def badge_colour(points, grade: Optional[str] = None) -> str:
+    if grade in BADGE_COLOURS:
+        return BADGE_COLOURS[grade]
+    p = float(points or 0)
+    return BADGE_COLOURS[next(g for floor, g in _BY_POINTS if p >= floor)]
+
+
+def badge(points, grade: Optional[str] = None, size: float = 36) -> bytes:
+    """
+    The "N PTS" picture for the embed's top-right corner.
+
+    Discord can only put an image there (an embed thumbnail), not styled text,
+    so this draws one: bold points on white, square, which Discord shows with
+    rounded corners. A Figure pyplot never sees, for the same reason as
+    render().
+    """
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    text = f"{float(points or 0):g} PTS"
+    fig = Figure(figsize=(2, 2), dpi=64, facecolor='white')
+    canvas = FigureCanvasAgg(fig)
+    label = fig.text(0.5, 0.5, text, ha='center', va='center',
+                     fontweight='bold', fontsize=size, color=badge_colour(points, grade))
+    # Fit the label to the square by MEASURING it, not by trusting a size.
+    # "2.5 PTS" at 36 pt is 121.7 px of the 128 available in DejaVu Sans,
+    # matplotlib's default -- too tight to rely on when the bot's host may
+    # resolve a different, wider bold face. Shrink until it has a margin.
+    room = 0.84 * fig.bbox.width
+    for _ in range(3):
+        width = label.get_window_extent(canvas.get_renderer()).width
+        if width <= room:
+            break
+        label.set_fontsize(label.get_fontsize() * room / width)
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', facecolor='white')
+    return buf.getvalue()

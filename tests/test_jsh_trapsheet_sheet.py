@@ -199,6 +199,37 @@ check("an unknown grade still gets a usable colour",
 check("no grade gets the neutral colour, not the good one",
       sheet.colour_of(None) != sheet.colour_of('OK'))
 
+# ---------------------------------------------------------------- badge
+import io as _io  # noqa: E402
+from PIL import Image  # noqa: E402
+
+# Every grade its own colour -- greenieboard's -- so no two read alike.
+GRADES_SCORED = ['_OK_', 'OK', '(OK)', 'B', '--', 'WO', 'C', 'NC']
+colours = [sheet.badge_colour(None, g) for g in GRADES_SCORED]
+check("every grade has a colour of its own", len(set(colours)) == len(colours),
+      str(dict(zip(GRADES_SCORED, colours))))
+eq("OK is greenieboard's green", sheet.badge_colour(4, 'OK'), '#29c248')
+eq("a cut is greenieboard's red", sheet.badge_colour(0, 'C'), '#cc0000')
+check("a no-count is not white -- it would vanish on the white badge",
+      sheet.badge_colour(0, 'NC').lower() not in ('#ffffff', '#fff'))
+# With no grade, the points alone still pick the right colour.
+for pts, grade in [(5, '_OK_'), (4, 'OK'), (3, '(OK)'), (2.5, 'B'), (2, '--'),
+                   (1, 'WO'), (0, 'C')]:
+    eq(f"{pts} points with no grade colours as {grade}",
+       sheet.badge_colour(pts), sheet.BADGE_COLOURS[grade])
+eq("no points recorded colours as a cut", sheet.badge_colour(None), '#cc0000')
+
+# 90 pt cannot fit 128 px in any font, so this fails without the fitting
+# whatever typeface the host resolves.
+for pts in (0, 2.5, 5):
+    im = Image.open(_io.BytesIO(sheet.badge(pts, size=90))).convert('RGB')
+    check(f"badge for {pts} is a 128x128 square", im.size == (128, 128), str(im.size))
+    w, h = im.size
+    edge = [im.getpixel((x, y)) for x in (0, w - 1) for y in range(h)]
+    check(f"badge for {pts}: text fits, both side edges stay white",
+          all(px == (255, 255, 255) for px in edge),
+          "the label runs off the square")
+
 failed = [c for c in checks if not c[1]]
 for label, ok, detail in checks:
     if not ok:

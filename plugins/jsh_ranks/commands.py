@@ -93,6 +93,8 @@ class Ranks(Plugin[RanksEventListener]):
 
     def __init__(self, bot: DCSServerBot, eventlistener=None):
         super().__init__(bot, eventlistener)
+        # officer_roles problems already logged; see reconcile_officer_roles().
+        self._officer_warned: set[str] = set()
 
     def enabled(self, server: Server) -> bool:
         return bool(self.get_config(server).get('enabled', True))
@@ -572,8 +574,14 @@ class Ranks(Plugin[RanksEventListener]):
                 except discord.Forbidden:
                     problems.append(f"no permission to {action} `{role.name}` -- the bot's role "
                                     f"must sit above it")
+        # These are CONFIG problems -- a role that does not exist, a step for
+        # a rank that is not on the ladder -- the same for every member. This
+        # runs on every role change in the Discord, so log each one once, not
+        # once per member per change. /ranks sync still lists them every run.
         for problem in problems:
-            self.log.warning(f"JSH Ranks: {member.display_name}: {problem}")
+            if problem not in self._officer_warned:
+                self._officer_warned.add(problem)
+                self.log.warning(f"JSH Ranks: officer_roles: {problem}")
         return problems
 
     async def apply_role(self, member: Optional[discord.Member], rank: str,

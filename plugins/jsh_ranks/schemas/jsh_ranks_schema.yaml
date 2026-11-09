@@ -173,23 +173,23 @@ schema;element_schema:
             add:
               type: seq
               nullable: false
-              desc: Discord role names to give from this rank up.
+              desc: Discord roles to give from this rank up, by name or ID.
               example: "Officer"
               sequence:
-                - type: str
+                - type: scalar
                   nullable: false
-                  desc: A Discord role name.
-                  example: "Junior Officer"
+                  desc: A Discord role, by name or by ID.
+                  example: "1515874158943146004"
             remove:
               type: seq
               nullable: false
-              desc: Discord role names to take away from this rank up.
+              desc: Discord roles to take away from this rank up, by name or ID.
               example: "Junior Officer"
               sequence:
-                - type: str
+                - type: scalar
                   nullable: false
-                  desc: A Discord role name.
-                  example: "Junior Officer"
+                  desc: A Discord role, by name or by ID.
+                  example: "1515874158943146004"
 
 schema;instance_schema:
   type: map

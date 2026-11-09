@@ -177,7 +177,25 @@ class Ranks(Plugin[RanksEventListener]):
             achievements = self.achievements()
         except ValueError:
             return []
-        return [n for n in (self._name_of(a) for a in self._sorted(achievements)) if n]
+        return [self._role_name(n) for n in
+                (self._name_of(a) for a in self._sorted(achievements)) if n]
+
+    def _role_name(self, token) -> str:
+        """
+        The Discord role's NAME for a config entry that may be a name or an ID.
+
+        CreditSystem accepts either for an achievement's role, and so does
+        everything here. The ladder is kept as names because the pay-grade
+        code is read out of the name ("Major (O-4)"), and Discord's own name
+        for an ID-configured role still carries it.
+        """
+        role = self.bot.get_role(token)
+        return role.name if role else str(token)
+
+    def _role_id(self, token) -> Optional[str]:
+        """The role's ID as a string, or None if no such role exists."""
+        role = self.bot.get_role(token)
+        return str(role.id) if role else None
 
     def full_ladder(self) -> list[str]:
         """
@@ -188,7 +206,7 @@ class Ranks(Plugin[RanksEventListener]):
         granted = []
         for key in self.granted_ranks():
             spec = self.granted_spec(str(key)) or {}
-            granted.append((spec.get('level') or 0, spec.get('role') or str(key)))
+            granted.append((spec.get('level') or 0, self._role_name(spec.get('role') or key)))
         ladder = self.earned_ladder()
         ladder += [role for _, role in sorted(granted, key=lambda g: g[0])
                    if role not in ladder]
@@ -525,13 +543,23 @@ class Ranks(Plugin[RanksEventListener]):
         Give the member exactly the officer roles their highest rank calls
         for, and take away the rest. Returns problems, for /ranks sync.
         """
-        steps = self.get_config().get('officer_roles') or {}
-        add, remove, unknown = promotions.officer_roles(
-            self.full_ladder(), steps, [r.name for r in member.roles])
+        raw = self.get_config().get('officer_roles') or {}
+        # A step's KEY may be a code (O-4), a rank name, or a rank role's ID;
+        # an ID becomes that role's name so it can be found on the ladder.
+        keyed = {(self._role_name(k) if self.bot.get_role(k) else str(k)): v
+                 for k, v in raw.items()}
+        # Every role in the steps becomes its ID, so a role named in one step
+        # and given by ID in another is still one role.
+        steps, unresolved = promotions.resolve_steps(keyed, self._role_id)
+        held = [r.name for r in member.roles] + [str(r.id) for r in member.roles]
+        add, remove, unknown = promotions.officer_roles(self.full_ladder(), steps, held)
         problems = [f"`{key}` in officer_roles matches no rank on the ladder"
                     for key in unknown]
+        problems += [f"role `{token}` does not exist in Discord" for token in unresolved]
         for names, action in ((add, 'add'), (remove, 'remove')):
             for name in names:
+                if name in unresolved:
+                    continue                  # already reported; never acted on
                 role = self.bot.get_role(name)
                 if role is None:
                     problems.append(f"role `{name}` does not exist in Discord")
@@ -542,7 +570,7 @@ class Ranks(Plugin[RanksEventListener]):
                     else:
                         await member.remove_roles(role, reason='JSH Ranks: officer role for rank')
                 except discord.Forbidden:
-                    problems.append(f"no permission to {action} `{name}` -- the bot's role "
+                    problems.append(f"no permission to {action} `{role.name}` -- the bot's role "
                                     f"must sit above it")
         for problem in problems:
             self.log.warning(f"JSH Ranks: {member.display_name}: {problem}")

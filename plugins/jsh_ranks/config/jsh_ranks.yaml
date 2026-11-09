@@ -217,6 +217,12 @@ DEFAULT:
   # campaign reset takes them all away. Granted ranks count: an O-10 is above
   # O-7. Run /ranks sync once after enabling, to apply it to everyone already
   # holding a rank.
+  #
+  # Roles may be names or Discord IDs, mixed freely -- a role given by ID in
+  # one step and by name in another is still recognised as the same role.
+  # Pilots demoted by inactivity decay lose these when their RANK ROLE drops,
+  # which CreditSystem does on their next disconnect; a full decay removal
+  # strips every rank at once, and these with it.
   # officer_roles:
   #   O-1:
   #     add: [Officer, Junior Officer]

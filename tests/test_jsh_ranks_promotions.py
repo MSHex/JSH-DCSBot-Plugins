@@ -123,6 +123,38 @@ eq("step order in config does not matter -- ladder order does",
    p.officer_roles(LADDER, dict(reversed(list(STEPS.items()))), [O5, 'Officer', 'Junior Officer'])[:2],
    (['Senior Officer'], ['Junior Officer']))
 
+# ------------------------------------------------- inactivity decay
+O6, E4 = EARNED[15], EARNED[3]
+held = [O6, 'Officer', 'Senior Officer']
+eq("decay O-6 -> E-4, new rank added first: all officer roles go once O-6 does",
+   roles([E4, 'Officer', 'Senior Officer']), ([], ['Officer', 'Senior Officer']))
+eq("...and while both are still held, nothing changes yet",
+   roles([O6, E4, 'Officer', 'Senior Officer']), ([], []))
+eq("decay with O-6 removed first: officer roles go at once",
+   roles(['Officer', 'Senior Officer']), ([], ['Officer', 'Senior Officer']))
+eq("a decay demotion is never announced as a rank-up",
+   p.promotion(EARNED, [O6], [O6, E4]), None)
+
+# ------------------------------------------------------ names and IDs
+IDS = {'Officer': '101', 'Junior Officer': '102', 'Senior Officer': '103',
+       '101': '101', '102': '102', '103': '103', 101: '101', 103: '103'}
+MIXED = {
+    'O-1': {'add': [101, 'Junior Officer']},                 # Officer by ID
+    'O-4': {'add': ['103'], 'remove': ['Junior Officer']},   # Senior by ID string
+}
+steps, bad = p.resolve_steps(MIXED, IDS.get)
+eq("names and IDs all become the role's ID",
+   steps, {'O-1': {'add': ['101', '102'], 'remove': []},
+           'O-4': {'add': ['103'], 'remove': ['102']}})
+eq("everything resolved", bad, [])
+held_ids = [O4, 'Officer', '101', 'Junior Officer', '102']   # names AND ids, as Discord gives
+eq("added by name at O-1, removed by name at O-4, matched by ID: Junior goes",
+   p.officer_roles(LADDER, steps, held_ids)[:2], (['103'], ['102']))
+steps, bad = p.resolve_steps({'O-1': {'add': ['Officer', 'Ghost Role']}}, IDS.get)
+eq("a role that does not exist is reported", bad, ['Ghost Role'])
+eq("...and kept as written, so it is never mistaken for a real role",
+   steps['O-1']['add'], ['101', 'Ghost Role'])
+
 failed = [c for c in checks if not c[1]]
 for label, ok, detail in checks:
     if not ok:

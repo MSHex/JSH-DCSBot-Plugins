@@ -393,6 +393,17 @@ still passes it, a demotion below O-4 gives Junior Officer back, and a
 campaign reset takes every officer role away. Granted ranks count: an O-10 is
 above O-7 and gets General Officer.
 
+**Names or IDs.** Every role here -- in `officer_roles`, and the rank roles
+in CreditSystem's achievements -- may be a name or a Discord ID, mixed freely.
+They are all resolved to the role's ID before comparing, so a role added by ID
+at O-1 and removed by name at O-4 is still recognised as one role.
+
+**Inactivity decay.** InactivityDecay lowers credits but does not touch Discord
+roles; the RANK role drops when CreditSystem next re-checks the pilot, on
+their next disconnect, and the officer roles follow it then. A full decay
+removal strips every rank role at once, and the officer roles with it. So
+officer roles always agree with the rank shown on the pilot's profile.
+
 The roles must exist in Discord, and the bot's role must sit above them.
 Problems are logged, and listed by `/ranks sync`.
 

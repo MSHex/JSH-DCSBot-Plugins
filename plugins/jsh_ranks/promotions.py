@@ -125,3 +125,35 @@ def officer_roles(ladder: list, steps: dict, held: Iterable[str]) -> tuple:
             want = (want | adds) - removes
 
     return sorted(want - held), sorted((managed - want) & held), unknown
+
+
+def resolve_steps(steps: dict, resolve) -> tuple:
+    """
+    (steps with every role as a canonical id, role tokens that did not resolve).
+
+    Roles in officer_roles may be names or Discord IDs, mixed freely. They are
+    all turned into ONE form first -- the role's ID, as a string -- because
+    the set arithmetic in officer_roles() compares them: a role added by ID at
+    O-1 and removed by name at O-4 must be recognised as the same role, or the
+    removal never happens.
+
+    `resolve(token)` returns the canonical id string, or None if no such role
+    exists. A token that does not resolve is kept as written, so it can still
+    be reported, and is never acted on.
+    """
+    out, unresolved = {}, []
+    for key, step in (steps or {}).items():
+        step = step or {}
+        fixed = {}
+        for action in ('add', 'remove'):
+            roles = []
+            for token in step.get(action) or []:
+                canon = resolve(token)
+                if canon is None:
+                    unresolved.append(str(token))
+                    roles.append(str(token))
+                else:
+                    roles.append(canon)
+            fixed[action] = roles
+        out[key] = fixed
+    return out, sorted(set(unresolved))

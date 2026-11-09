@@ -190,6 +190,39 @@ schema;element_schema:
                   nullable: false
                   desc: A Discord role, by name or by ID.
                   example: "1515874158943146004"
+    rank_decay:
+      type: map
+      nullable: false
+      desc: >-
+        Lower rank roles that inactivity decay has taken away, instead of
+        waiting for the pilot's next disconnect. Demotions only, from the same
+        credits, hours and rule CreditSystem uses. Members holding a grant are
+        skipped. Runs on the master node. Read from DEFAULT only.
+      mapping:
+        enabled:
+          type: bool
+          nullable: false
+          desc: Run the scheduled check.
+          example: "true"
+        campaign_id:
+          type: int
+          nullable: false
+          range: {min: 1}
+          desc: The campaign whose credits decide rank -- the one InactivityDecay deducts from.
+          example: "1"
+        interval_minutes:
+          type: int
+          nullable: false
+          range: {min: 10}
+          desc: Minutes between checks.
+          example: "60"
+        dry_run:
+          type: bool
+          nullable: false
+          desc: >-
+            Only log what would change. On by default; turn it off once the
+            log looks right.
+          example: "true"
 
 schema;instance_schema:
   type: map

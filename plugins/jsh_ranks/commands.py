@@ -5,12 +5,12 @@ import os
 
 from core import Plugin, Group, utils, Server, Status
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from psycopg.rows import dict_row
 from services.bot import DCSServerBot
 from typing import Optional
 
-from . import grants, promotions, slots
+from . import decay, grants, promotions, slots
 from .listener import RanksEventListener
 
 #: One UDP datagram. DCS reads with LuaSocket's 8192-byte default and
@@ -95,6 +95,28 @@ class Ranks(Plugin[RanksEventListener]):
         super().__init__(bot, eventlistener)
         # officer_roles problems already logged; see reconcile_officer_roles().
         self._officer_warned: set[str] = set()
+
+    # ------------------------------------------------------------- lifecycle
+    def _decay_config(self) -> Optional[dict]:
+        """rank_decay from DEFAULT, or None when it is off."""
+        cfg = self.get_config().get('rank_decay')
+        if not cfg or not cfg.get('enabled', True):
+            return None
+        return cfg
+
+    async def cog_load(self) -> None:
+        await super().cog_load()
+        # Roles are one Discord, credits one database: on a multi-node setup
+        # every node loads every plugin, so only the master may run the pass.
+        cfg = self._decay_config()
+        if cfg and self.node.master:
+            self.decay_schedule.change_interval(
+                minutes=max(10, int(cfg.get('interval_minutes', 60))))
+            utils.safe_start(self.decay_schedule)
+
+    async def cog_unload(self) -> None:
+        await utils.safe_cancel(self.decay_schedule)
+        await super().cog_unload()
 
     def enabled(self, server: Server) -> bool:
         return bool(self.get_config(server).get('enabled', True))
@@ -417,6 +439,92 @@ class Ranks(Plugin[RanksEventListener]):
         self.log.debug(f"JSH Ranks: pushed {len(levels)} rank(s) to {server.name}"
                        + (f", commanders {commanders}" if commanders else ""))
         return len(levels)
+
+    # ---------------------------------------------------- inactivity decay
+    async def decay_pass(self, dry_run: bool) -> dict:
+        """
+        Lower every member's earned rank role to what their credits and hours
+        still earn. See decay.py for why this can never fight CreditSystem.
+
+        Skipped, never guessed at: members with no linked DCS account, and
+        members holding a grant -- a grant is an admin's decision about that
+        pilot, and not this pass's to second-guess.
+        """
+        cfg = self._decay_config() or {}
+        result = {'checked': 0, 'changes': [], 'problems': [], 'dry_run': dry_run}
+        ladder = self.earned_ladder()
+        achievements = self._sorted(self.achievements())
+        if not ladder or not self.bot.guilds:
+            result['problems'].append("no earned ladder (is CreditSystem loaded?)")
+            return result
+        guild = self.bot.guilds[0]
+        ranked = {m.id: m for m in guild.members
+                  if not m.bot and any(r.name in ladder for r in m.roles)}
+        if not ranked:
+            return result
+        async with self.apool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cursor:
+                await cursor.execute(decay.INPUTS, {
+                    'campaign_id': int(cfg.get('campaign_id', 1)),
+                    'discord_ids': list(ranked)})
+                rows = await cursor.fetchall()
+        by_member: dict[int, list[dict]] = {}
+        for row in rows:
+            by_member.setdefault(int(row['discord_id']), []).append(row)
+        granted = await self.grants_for([r['ucid'] for r in rows])
+
+        for discord_id, accounts in by_member.items():
+            member = ranked[discord_id]
+            if any(a['ucid'] in granted for a in accounts):
+                continue
+            result['checked'] += 1
+            deserved = []
+            for a in accounts:
+                current, _ = get_rank_progress(achievements, int(a['credits'] or 0),
+                                               float(a['playtime'] or 0) / 3600.0)
+                name = self._name_of(current) if current else None
+                deserved.append(self._role_name(name) if name else None)
+            target = decay.best_rank(ladder, deserved)
+            change = decay.demotion(ladder, [r.name for r in member.roles], target)
+            if change is None:
+                continue
+            add, remove = ([r for r in map(self.bot.get_role, names) if r] for names in change)
+            old = decay._highest(ladder, [r.name for r in member.roles])
+            result['changes'].append(f"{member.display_name}: {old} -> {target or 'no rank'}")
+            if dry_run:
+                continue
+            try:
+                # Add first, as CreditSystem does, so a member is never left
+                # with no rank between the two calls.
+                if add:
+                    await member.add_roles(*add,
+                                           reason='JSH Ranks: inactivity decay')
+                if remove:
+                    await member.remove_roles(*remove,
+                                              reason='JSH Ranks: inactivity decay')
+            except discord.Forbidden:
+                result['problems'].append(f"no permission to change {member.display_name}'s "
+                                          f"rank -- the bot's role must sit above the ranks")
+        verb = 'would lower' if dry_run else 'lowered'
+        self.log.info(f"JSH Ranks: decay check: {result['checked']} member(s) checked, "
+                      f"{verb} {len(result['changes'])}"
+                      + ''.join(f"\n  {c}" for c in result['changes']))
+        for problem in result['problems']:
+            self.log.warning(f"JSH Ranks: decay: {problem}")
+        return result
+
+    @tasks.loop(minutes=60)
+    async def decay_schedule(self):
+        cfg = self._decay_config()
+        if cfg:
+            try:
+                await self.decay_pass(dry_run=bool(cfg.get('dry_run', True)))
+            except Exception as ex:
+                self.log.exception(f"JSH Ranks: decay check failed: {ex}")
+
+    @decay_schedule.before_loop
+    async def before_decay_schedule(self):
+        await self.bot.wait_until_ready()
 
     # ------------------------------------------------------------ commands
     ranks = Group(name="ranks", description="Discord ranks inside the mission")
@@ -807,6 +915,26 @@ class Ranks(Plugin[RanksEventListener]):
             if officer_problems:
                 lines.append("**Officer roles:**\n" + "\n".join(
                     f"- {p}" for p in sorted(officer_problems)[:10]))
+        await interaction.followup.send("\n".join(lines)[:1990], ephemeral=True)
+
+    @ranks.command(name='decay', description='Lower rank roles that inactivity decay has taken away')
+    @app_commands.guild_only()
+    @utils.app_has_roles(GM_ROLES)
+    @app_commands.describe(apply='Change roles. Leave off to only list what would change.')
+    async def decay_cmd(self, interaction: discord.Interaction, apply: bool = False):
+        await interaction.response.defer(ephemeral=True)
+        if not self._decay_config():
+            await interaction.followup.send(
+                "`rank_decay` is not configured in jsh_ranks.yaml.", ephemeral=True)
+            return
+        result = await self.decay_pass(dry_run=not apply)
+        head = (f"Checked {result['checked']} ranked member(s). "
+                f"{'Lowered' if apply else 'Would lower'} {len(result['changes'])}:")
+        lines = [head] + [f"- {c}" for c in result['changes'][:25]]
+        if len(result['changes']) > 25:
+            lines.append(f"...and {len(result['changes']) - 25} more (see the bot log).")
+        if result['problems']:
+            lines.append("**Problems:**\n" + "\n".join(f"- {p}" for p in result['problems'][:10]))
         await interaction.followup.send("\n".join(lines)[:1990], ephemeral=True)
 
     @ranks.command(name='grants', description='List every manually assigned rank')

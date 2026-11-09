@@ -15,9 +15,11 @@ local JT = jsh_trapsheet
 
 JT.cfg = JT.cfg or {
   rate      = 0.1,     -- seconds between samples
-  range     = 2778,    -- start sampling within this many metres (1.5 NM)
-  ceiling   = 1500,    -- ... and below this altitude above the deck, in feet
-  maxpoints = 600,     -- hard cap per pass, so a go-around cannot grow forever
+  range     = 2778,    -- Case I/II: start at the wake, within this many metres (1.5 NM)
+  straight  = 7408,    -- Case III: start a descending straight-in within this (4 NM)
+  ceiling   = 2000,    -- ... and below this altitude above the deck, in feet
+  maxpoints = 1200,    -- hard cap per pass, so a go-around cannot grow forever
+  bow       = 180,     -- keep sampling until this far AHEAD of the ship's origin
   -- Deck type names to sample, matched as PREFIXES. Only Super Carrier decks
   -- raise S_EVENT_LANDING_QUALITY_MARK, so a pass anywhere else could never
   -- be graded. Filtering here rather than discarding later means a legacy
@@ -213,8 +215,39 @@ function JT.sample(unit, decks)
 
   -- 5 m/s rather than 0 so an aircraft stopped on the wires, or taxiing,
   -- reads as NOT closing and the pass ends, instead of hovering on noise.
-  local inside = bestd <= JT.cfg.range and alt <= JT.cfg.ceiling and x > 0
-                 and closing(unit, best) > 5
+  local moving = closing(unit, best) > 5 and alt <= JT.cfg.ceiling
+
+  -- Where a pass STARTS and ENDS follows AIRBOSS (Airboss.lua):
+  --
+  --  * Case I/II: recording starts at the WAKE -- _Wake() moves the player to
+  --    FINAL once Z >= 0, i.e. directly behind the ship or starboard of it.
+  --    Before that the aircraft is in the 90-to-wake part of the turn, port
+  --    of the axis, and AIRBOSS records nothing.
+  --  * Case III: _Bullseye() moves the player straight to the groove inside a
+  --    zone 3 NM astern, radius 1 NM -- so from up to 4 NM out. We do not know
+  --    the recovery case, so a straight-in is recognised by what it looks
+  --    like: astern, descending, near the approach line.
+  --  * The end: a trap ends when the jet stops on the wires (no longer
+  --    closing); a bolter or wave-off is recorded until it passes the BOW,
+  --    where AIRBOSS's _Groove() debriefs it.
+  --
+  -- Once started, the lineup is not checked again: the angled deck's
+  -- centreline crosses the ship's axis near the ramp, so a good pass ends
+  -- close to Z = 0 and may dip just port of it.
+  -- An overhead INITIAL is also astern, starboard-ish and closing, at
+  -- 800 ft -- but at 300+ kt. No approach is flown that fast, so a start is
+  -- refused above 110 m/s (~215 kt) of closing. Without this every break
+  -- recorded a bogus pass, which the bot then had to wait out ungraded.
+  local vy = unit:getVelocity().y
+  local start = x > 0 and alt > 50 and moving and closing(unit, best) < 110 and (
+      (bestd <= JT.cfg.range and z >= 0)
+      or (bestd <= JT.cfg.straight and z >= -185 and vy < -1.5))
+  local inside
+  if track then
+    inside = moving and x > -JT.cfg.bow and bestd <= JT.cfg.straight
+  else
+    inside = start
+  end
 
   if inside then
     if not track then
@@ -272,13 +305,14 @@ function JT.flush(k)
   dcsbot.sendBotTable(msg)
 end
 
--- A landing or a crash ends a pass immediately, without waiting for the
--- aircraft to leave the capture window.
+-- A crash or an ejection ends a pass immediately. A LANDING does not: on a
+-- bolter DCS reports the touchdown and the jet flies on, and AIRBOSS keeps
+-- recording to the bow. A trap ends by itself a second or two later, when
+-- the jet stops closing on the ship; the bot cuts that rollout off.
 JT.handler = JT.handler or {}
 function JT.handler:onEvent(e)
   if not e.initiator then return end
-  if e.id == world.event.S_EVENT_LAND
-     or e.id == world.event.S_EVENT_CRASH
+  if e.id == world.event.S_EVENT_CRASH
      or e.id == world.event.S_EVENT_EJECTION then
     local k = key(e.initiator)
     if k and JT.tracks[k] then

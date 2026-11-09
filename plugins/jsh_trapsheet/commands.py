@@ -73,12 +73,14 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
         tuning = {
             'rate': float(config.get('sample_rate', 0.1)),
             'range': float(config.get('capture_range_nm', 1.5)) * 1852.0,
-            'ceiling': float(config.get('capture_ceiling_ft', 1500)),
-            'maxpoints': int(config.get('max_points', 600)),
+            'straight': float(config.get('straight_in_nm', 4.0)) * 1852.0,
+            'ceiling': float(config.get('capture_ceiling_ft', 2000)),
+            'maxpoints': int(config.get('max_points', 1200)),
         }
         script = minify_lua(script) + (
             f"\njsh_trapsheet.cfg.rate={tuning['rate']!r} "
             f"jsh_trapsheet.cfg.range={tuning['range']!r} "
+            f"jsh_trapsheet.cfg.straight={tuning['straight']!r} "
             f"jsh_trapsheet.cfg.ceiling={tuning['ceiling']!r} "
             f"jsh_trapsheet.cfg.maxpoints={tuning['maxpoints']!r} "
             f"jsh_trapsheet.cfg.decks={sheet.lua_list(decks)}")
@@ -124,11 +126,15 @@ class TrapSheet(Plugin[TrapSheetEventListener]):
         grades, errors, marks = self._greenieboard_tables()
         meta = pass_.get('meta') or {}
 
-        # Cut at touchdown: the rollout in the wires is not part of the
-        # approach, and stored, plotted or timed it skews all three.
-        points = sheet.trim_touchdown(pass_.get('points') or [])
+        # Cut a trap at touchdown: the rollout in the wires is not part of the
+        # approach, and stored, plotted or timed it skews all three. A BOLTER
+        # is kept to the bow, as AIRBOSS records it -- the touch and the
+        # departure are the pass. Groove time ends at touchdown either way.
+        raw = pass_.get('points') or []
+        landed = sheet.trim_touchdown(raw)
+        points = sheet.plotted(raw, grade)
         unit_type = pass_.get('unit_type') or player.unit_type or ''
-        tgroove = sheet.groove_time(points, float(config.get('sample_rate', 0.1)))
+        tgroove = sheet.groove_time(landed, float(config.get('sample_rate', 0.1)))
         wire = sheet.wire_of(comment)
         details = sheet.details_of(comment)
 

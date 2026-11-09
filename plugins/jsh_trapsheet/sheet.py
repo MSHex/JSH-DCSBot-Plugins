@@ -257,6 +257,17 @@ def trim_touchdown(points: list) -> list:
     return points
 
 
+def plotted(points: list, grade: Optional[str]) -> list:
+    """
+    What goes on the picture: a trap to touchdown, a BOLTER whole.
+
+    AIRBOSS records a bolter until it passes the bow -- the touch on the deck
+    and the departure are the pass -- and so does the recorder. Cutting it at
+    the first touch would draw a bolter as a trap.
+    """
+    return points if grade == 'B' else trim_touchdown(points)
+
+
 #: Colours for the AoA band, as FunkMan draws it: limits red, on-speed green.
 BAND_LIMIT = '#e74c3c'
 BAND_ONSPEED = '#2ecc71'

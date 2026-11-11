@@ -1,0 +1,94 @@
+# jsh_cq reads one shared database and writes logbook's tables, so like
+# jsh_statfix it is configured under DEFAULT only.
+type: map
+nullable: false
+mapping:
+  DEFAULT:
+    type: map
+    nullable: false
+    desc: Carrier qualification rules. Read from DEFAULT only.
+    mapping:
+      day_traps:
+        type: int
+        nullable: false
+        range: {min: 1}
+        desc: Qualifying DAY traps needed inside the window for a day CQ.
+        example: "4"
+      night_traps:
+        type: int
+        nullable: false
+        range: {min: 0}
+        desc: >-
+          Qualifying NIGHT traps needed for a night CQ, which also requires a
+          current day CQ. 0 turns night CQ off.
+        example: "2"
+      valid_days:
+        type: int
+        nullable: false
+        range: {min: 1}
+        desc: >-
+          The window traps must fall in. A CQ expires when the oldest trap that
+          still counts drops out of it, so it renews for a pilot who keeps trapping.
+        example: "90"
+      min_points:
+        type: float
+        nullable: false
+        desc: >-
+          Lowest greenieboard points that count. With greenieboard's default
+          grades, 3 is (OK) Fair or better. A trap with no wire never counts.
+        example: "3"
+      places:
+        type: seq
+        nullable: false
+        desc: Only traps on these carriers (unit names) count. Empty for every carrier.
+        example: "[CVN-72 Abraham Lincoln]"
+        sequence:
+          - type: str
+            nullable: false
+            desc: A carrier's unit name, as greenieboard records it in traps.place.
+            example: CVN-72 Abraham Lincoln
+      day_qualification:
+        type: str
+        nullable: false
+        desc: The logbook qualification granted for a day CQ. Created if missing.
+        example: CQ_CV_DAY
+      night_qualification:
+        type: str
+        nullable: false
+        desc: The logbook qualification granted for a night CQ. Created if missing.
+        example: CQ_CV_NIGHT
+      day_award:
+        type: str
+        nullable: false
+        desc: >-
+          A logbook award (ribbon) given the first time a pilot earns a day CQ.
+          Create it first with /award create. Omit for none.
+        example: Carrier Qualification Ribbon
+      night_award:
+        type: str
+        nullable: false
+        desc: A logbook award given the first time a pilot earns a night CQ. Omit for none.
+        example: Night Carrier Qualification Ribbon
+      channel:
+        type: int
+        nullable: false
+        desc: Discord channel new qualifications are announced in. Omit for none.
+        example: "1234567890123456789"
+      day_message:
+        type: str
+        nullable: false
+        desc: "Announcement for a new day CQ. Placeholders: {pilot} {kind}."
+        example: "{pilot} is now carrier qualified ({kind})!"
+      night_message:
+        type: str
+        nullable: false
+        desc: "Announcement for a new night CQ. Placeholders: {pilot} {kind}."
+        example: "{pilot} is now night carrier qualified!"
+      sweep_minutes:
+        type: int
+        nullable: false
+        range: {min: 10}
+        desc: >-
+          Minutes between full re-checks on the master node. Traps are also
+          checked about 15 seconds after each grade.
+        example: "60"

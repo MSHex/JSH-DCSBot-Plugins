@@ -1,0 +1,41 @@
+# Copy to <bot>/config/plugins/jsh_cq.yaml. Needs greenieboard AND logbook.
+#
+# Carrier qualification from greenieboard's traps, written into logbook's own
+# qualifications, so a CQ shows in /logbook pilot and /qualification list and
+# expires through logbook like any other.
+#
+# IMPORTANT: if CQ_CV_DAY / CQ_CV_NIGHT have logbook `requirements` set, clear
+# them, or logbook ALSO grants them from its lifetime carrier_landings count:
+#   UPDATE logbook_qualifications SET requirements = NULL
+#    WHERE name IN ('CQ_CV_DAY', 'CQ_CV_NIGHT');
+# jsh_cq warns in the log once if it finds them set.
+
+DEFAULT:
+  # 4 day traps, then 2 night traps, inside a 90-day window. A CQ expires when
+  # its oldest counting trap drops out of the window, so it renews for a pilot
+  # who keeps trapping and lapses for one who stops.
+  day_traps: 4
+  night_traps: 2
+  valid_days: 90
+
+  # Lowest greenieboard points that count: 3 is (OK) Fair or better with the
+  # default grades. A trap with no wire never counts.
+  min_points: 3
+
+  # Only traps on these carriers count. Empty: all of them.
+  places: []
+
+  day_qualification: CQ_CV_DAY
+  night_qualification: CQ_CV_NIGHT
+
+  # Ribbons: logbook awards given the first time each CQ is earned. Create
+  # them with /award create first.
+  # day_award: Carrier Qualification Ribbon
+  # night_award: Night Carrier Qualification Ribbon
+
+  # Announce new qualifications. Renewals are silent.
+  # channel: 1234567890123456789
+  # day_message: "{pilot} is now carrier qualified ({kind})!"
+  # night_message: "{pilot} is now night carrier qualified!"
+
+  sweep_minutes: 60

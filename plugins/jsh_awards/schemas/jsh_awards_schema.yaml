@@ -1,0 +1,79 @@
+# One board for the whole community, so DEFAULT only, posted by the master node.
+type: map
+nullable: false
+mapping:
+  DEFAULT:
+    type: map
+    nullable: false
+    desc: The monthly awards board. Read from DEFAULT only.
+    mapping:
+      enabled:
+        type: bool
+        nullable: false
+        desc: Post the board automatically on the 1st. /awards post works either way.
+        example: "true"
+      channel:
+        type: int
+        nullable: false
+        desc: Discord channel the board is posted in.
+        example: "1234567890123456789"
+      title:
+        type: str
+        nullable: false
+        desc: The board's heading; the month is added after it.
+        example: Monthly awards
+      categories:
+        type: seq
+        nullable: false
+        desc: Which boards to post, in a fixed order. Omit for all of them.
+        example: "[credits, csar, hours, kd_aa, kd_ag]"
+        sequence:
+          - type: str
+            nullable: false
+            enum: [credits, csar, hours, kd_aa, kd_ag]
+            desc: One category.
+            example: hours
+      top:
+        type: int
+        nullable: false
+        range: {min: 1, max: 10}
+        desc: How many pilots each category lists.
+        example: "3"
+      min_kills:
+        type: int
+        nullable: false
+        range: {min: 1}
+        desc: >-
+          Kills of that kind needed to appear on a K/D board, so one lucky
+          kill and no deaths cannot top it.
+        example: "5"
+      campaign_id:
+        type: int
+        nullable: false
+        desc: Count credits from this CreditSystem campaign only. Omit for every campaign.
+        example: "1"
+      exclude_events:
+        type: seq
+        nullable: false
+        desc: >-
+          credits_log events that are not earnings. Transfers between pilots
+          ('donation') by default.
+        example: "[donation]"
+        sequence:
+          - type: str
+            nullable: false
+            desc: A credits_log event name, matched without regard to case.
+            example: donation
+      awards:
+        type: map
+        nullable: false
+        desc: >-
+          A logbook award given to each category's winner, keyed by category.
+          Create the awards first with /award create. Omit for none.
+        example: "{hours: Iron Butt Ribbon}"
+        mapping:
+          regex;(credits|csar|hours|kd_aa|kd_ag):
+            type: str
+            nullable: false
+            desc: The logbook award's name.
+            example: Iron Butt Ribbon

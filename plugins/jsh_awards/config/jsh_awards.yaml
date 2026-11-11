@@ -1,0 +1,31 @@
+# Copy to <bot>/config/plugins/jsh_awards.yaml on the MASTER node.
+#
+# Posts last month's leaders on the 1st (UTC). The first month after install is
+# skipped, since the plugin was not there for all of it -- /awards post can
+# still post it by hand. /awards preview shows any month privately.
+
+DEFAULT:
+  enabled: true
+  channel: 1234567890123456789        # replace with your awards channel id
+  title: Monthly awards
+
+  # credits  : credits EARNED in the month (gains only; decay and spending
+  #            don't subtract, transfers between pilots don't count)
+  # csar     : rescues, from jsh_csar
+  # hours    : time in a slot, each session clipped to the month
+  # kd_aa    : aircraft killed / deaths to aircraft
+  # kd_ag    : ground, SAM and ship kills / deaths to those
+  categories: [credits, csar, hours, kd_aa, kd_ag]
+  top: 3
+  min_kills: 5
+
+  # campaign_id: 1                    # only this campaign's credits
+  exclude_events: [donation]
+
+  # A logbook award (ribbon) for each winner, the month in its citation.
+  # awards:
+  #   credits: Top Earner Ribbon
+  #   csar: Rescue Ribbon
+  #   hours: Iron Butt Ribbon
+  #   kd_aa: Ace of the Month
+  #   kd_ag: Mud Mover of the Month

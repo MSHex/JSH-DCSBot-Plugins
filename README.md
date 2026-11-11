@@ -14,6 +14,9 @@ written for the JSH servers and used in production there.
 | [`jsh_ranks`](plugins/jsh_ranks/) | Makes a Foothold mission enforce the Discord rank ladder instead of its own in-mission rank credits. |
 | [`jsh_coords`](plugins/jsh_coords/) | `/coords convert` — paste a coordinate in any format DCS uses and get it back in all the others, including MGRS, the three lat/long forms, DCS metric X/Z and terrain altitude. |
 | [`battlegroundbridge`](plugins/battlegroundbridge/) | Bridges DCS F10 marker intel and Common-layer mission drawings into [DCSBattleground](https://github.com/Frigondin/DCSBattleground). Marker-created reports keep website-added notes and screenshots. |
+| [`jsh_cq`](plugins/jsh_cq/) | Carrier qualification from greenieboard's traps — 4 day traps, then 2 night, in 90 days — written into logbook's qualifications and ribbons. |
+| [`jsh_awards`](plugins/jsh_awards/) | Monthly awards board on the 1st: credits earned, CSAR rescues, flight hours, and K/D air-to-air and air-to-ground. |
+| [`jsh_doctor`](plugins/jsh_doctor/) | `/jsh doctor` — checks for the setup mistakes that fail silently: misnamed config sections, the Foothold config file name, `RankingSystem`, role order, broken sessions. |
 
 Each plugin is independent and has its own README with install steps, commands
 and configuration. They do interact through credits, though — see below.

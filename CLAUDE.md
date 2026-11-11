@@ -231,6 +231,9 @@ neither MOOSE nor the FunkMan package — only `{X, Z, Alt, AoA}` plus
 | `jsh_coords` | Coordinate conversion |
 | `hardcore` | Joker's hardcore economy |
 | `awardautomation` | Automatic medals |
+| `jsh_cq` | Carrier qualification into logbook; real rules, not a lifetime count |
+| `jsh_awards` | Monthly awards board |
+| `jsh_doctor` | `/jsh doctor`: the silent-mistake checks from this file |
 
 `rankstatus` imports `jsh_ranks.grants` **lazily, inside the method**: at
 module level it would make rankstatus fail to load without `jsh_ranks`, and

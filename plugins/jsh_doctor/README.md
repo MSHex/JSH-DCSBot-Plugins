@@ -1,4 +1,4 @@
-# JSH Doctor 1.0 — `/jsh doctor`
+# JSH Doctor 1.1 — `/jsh doctor`
 
 Checks JSH's setup for the mistakes that fail **silently**. Each one has
 already cost an evening. The command is read-only and changes nothing.
@@ -18,7 +18,10 @@ list the checks that passed.
 | Database | Sessions open for over a day, which the bot would later credit up to the mission's end |
 | Database | `jsh_cq`'s logbook qualifications don't also carry logbook requirements |
 
-Instance files can only be read on the node they live on. An instance on
-another node is listed as not checked.
+Foothold files are checked on **every node**. An instance on the agent is
+read through the bot's own node API (`list_directory` and `read_file` over the
+bus), so nothing extra needs to be installed there. Its findings are marked
+`(on <node>)`. If the agent is offline, that instance is listed as not
+checked; it may take up to a minute per instance to give up.
 
 No configuration file is needed.

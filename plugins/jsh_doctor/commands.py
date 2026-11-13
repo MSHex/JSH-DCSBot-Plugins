@@ -61,33 +61,51 @@ class Doctor(Plugin):
                                     "Every plugin config section names a real instance.")]
         return out
 
-    def check_foothold(self) -> list[Finding]:
+    async def check_foothold(self) -> list[Finding]:
+        """
+        Through the server's own node, so an instance on the AGENT is checked
+        as well as one here: list_directory and read_file are the bot's node
+        API, run locally on this node and by RPC on the other. Nothing extra
+        has to be installed on the agent beyond the bot itself.
+        """
         out = []
         ranks_loaded = 'Ranks' in self.bot.cogs
+        seen = set()
         for server in self.bus.servers.values():
-            instance = server.instance.name if server.instance else server.name
-            if server.is_remote:
-                out.append(Finding(checks.SKIP, 'foothold',
-                                   f"{instance}: on another node, so its files "
-                                   f"cannot be read from here."))
+            if not server.instance or not server.instance.home or server.instance.name in seen:
                 continue
+            seen.add(server.instance.name)
+            instance = server.instance.name
+            where = f" (on {server.node.name})" if server.is_remote else ""
             saves = os.path.join(server.instance.home, 'Missions', 'Saves')
             try:
-                names = os.listdir(saves)
-            except OSError:
-                continue                    # no Saves folder: not a Foothold instance
-            found = checks.foothold_files(instance, names)
+                _, paths = await server.node.list_directory(saves, pattern='Foothold*Config*.lua')
+            except Exception as ex:
+                out.append(Finding(checks.SKIP, 'foothold',
+                                   f"{instance}{where}: could not list its files -- is the node "
+                                   f"online? ({type(ex).__name__})"))
+                continue
+            names = [p.replace('\\', '/').rsplit('/', 1)[-1] for p in paths]
+            found = checks.foothold_files(instance + where, names)
             if not found:
                 continue                    # no Foothold config here at all
             out += found
-            if ranks_loaded:
-                for config in FOOTHOLD_CONFIGS:
-                    path = os.path.join(saves, config)
-                    if os.path.exists(path):
-                        with open(path, encoding='utf-8', errors='replace') as f:
-                            finding = checks.ranking_system(instance, f.read())
-                        if finding:
-                            out.append(finding)
+            if not ranks_loaded:
+                continue
+            for config in FOOTHOLD_CONFIGS:
+                if config not in names:
+                    continue
+                try:
+                    data = await server.node.read_file(os.path.join(saves, config))
+                except Exception as ex:
+                    out.append(Finding(checks.SKIP, 'foothold',
+                                       f"{instance}{where}: could not read `{config}` "
+                                       f"({type(ex).__name__})."))
+                    continue
+                text = data.decode('utf-8', errors='replace') if isinstance(data, bytes) else None
+                finding = checks.ranking_system(instance + where, text)
+                if finding:
+                    out.append(finding)
         return out
 
     def check_discord(self) -> list[Finding]:
@@ -135,12 +153,17 @@ class Doctor(Plugin):
 
     async def run(self) -> list[Finding]:
         findings: list[Finding] = []
-        for step in (self.check_config, self.check_foothold, self.check_discord):
+        for step in (self.check_config, self.check_discord):
             try:
                 findings += step()
             except Exception as ex:
                 self.log.exception(f"JSH Doctor: {step.__name__} failed: {ex}")
                 findings.append(Finding(checks.WARN, step.__name__[6:], f"Check failed: {ex}"))
+        try:
+            findings += await self.check_foothold()
+        except Exception as ex:
+            self.log.exception(f"JSH Doctor: check_foothold failed: {ex}")
+            findings.append(Finding(checks.WARN, 'foothold', f"Check failed: {ex}"))
         try:
             findings += await self.check_database()
         except Exception as ex:

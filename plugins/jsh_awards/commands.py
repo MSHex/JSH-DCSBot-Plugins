@@ -40,16 +40,29 @@ class MonthlyAwards(Plugin):
         await super().cog_unload()
 
     # ----------------------------------------------------------------- board
-    async def leaders(self, month) -> dict[str, list[board.Entry]]:
+    async def leaders(self, month) -> tuple[Optional[str], dict[str, list[board.Entry]]]:
+        """
+        (campaign name, {category: leaders}) for one month, counting only the
+        campaign: its servers, its dates, its registered pilots. No campaign
+        overlapping the month: (None, {}).
+        """
         cfg = self.settings()
         top = max(1, min(10, int(cfg.get('top', 3))))
-        start, end = board.month_bounds(month)
-        params = {'start': start, 'end': end, 'top': top,
-                  'exclude': [str(e).lower() for e in (cfg.get('exclude_events') or ['donation'])],
-                  'campaign_id': cfg.get('campaign_id')}
+        month_start, month_end = board.month_bounds(month)
         result: dict[str, list[board.Entry]] = {}
         async with self.apool.connection() as conn:
             async with conn.cursor(row_factory=dict_row) as cursor:
+                await cursor.execute(sql.CAMPAIGN, {'campaign_id': cfg.get('campaign_id'),
+                                                    'start': month_start, 'end': month_end})
+                campaign = await cursor.fetchone()
+                if not campaign:
+                    return None, result
+                window = board.clip(month_start, month_end, campaign['start'], campaign['stop'])
+                if not window:
+                    return campaign['name'], result
+                params = {'start': window[0], 'end': window[1], 'top': top,
+                          'campaign_id': campaign['id'],
+                          'exclude': [str(e).lower() for e in (cfg.get('exclude_events') or ['donation'])]}
                 await cursor.execute(sql.TABLES)
                 have = await cursor.fetchone()
                 for category in self.categories():
@@ -67,10 +80,12 @@ class MonthlyAwards(Plugin):
                     result[category] = [
                         board.Entry(r['ucid'], r['name'], int(r['discord_id'] or -1), float(r['value']))
                         for r in await cursor.fetchall()]
-        return result
+        return campaign['name'], result
 
-    def embed(self, month, leaders: dict) -> discord.Embed:
+    def embed(self, month, campaign: Optional[str], leaders: dict) -> discord.Embed:
         embed = discord.Embed(title=self.settings().get('title', 'Monthly awards') + f" — {month:%B %Y}",
+                              description=(f"Campaign: **{campaign}**" if campaign
+                                           else "No campaign ran this month."),
                               colour=discord.Colour.gold())
         for category in self.categories():
             if category in leaders:
@@ -78,7 +93,8 @@ class MonthlyAwards(Plugin):
                                 value=board.field(category, leaders[category]), inline=False)
         cfg = self.settings()
         embed.set_footer(text=f"K/D needs {int(cfg.get('min_kills', 5))}+ kills of that kind. "
-                              f"Hours are time in a slot.")
+                              f"Hours are time in a slot. Campaign servers and "
+                              f"registered pilots only.")
         return embed
 
     async def give_awards(self, month, leaders: dict) -> list[str]:
@@ -114,8 +130,8 @@ class MonthlyAwards(Plugin):
         if not channel:
             self.log.warning(f"JSH Awards: channel {channel_id} not found, board not posted.")
             return None
-        leaders = await self.leaders(month)
-        message = await channel.send(embed=self.embed(month, leaders),
+        campaign, leaders = await self.leaders(month)
+        message = await channel.send(embed=self.embed(month, campaign, leaders),
                                      allowed_mentions=discord.AllowedMentions.none())
         for problem in await self.give_awards(month, leaders):
             self.log.warning(f"JSH Awards: {problem}")
@@ -162,7 +178,8 @@ class MonthlyAwards(Plugin):
         if not which:
             await interaction.followup.send("Month must look like 2026-10.", ephemeral=True)
             return
-        await interaction.followup.send(embed=self.embed(which, await self.leaders(which)),
+        campaign, leaders = await self.leaders(which)
+        await interaction.followup.send(embed=self.embed(which, campaign, leaders),
                                         ephemeral=True)
 
     @awards.command(name='post', description='Post a month\'s board to the awards channel now')

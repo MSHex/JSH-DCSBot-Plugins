@@ -1,4 +1,4 @@
-# JSH Awards 1.0 — monthly awards board
+# JSH Awards 1.1 — monthly awards board
 
 On the 1st of every month (UTC), posts last month's leaders in five
 categories. It can also give each winner a **logbook** award, with the month
@@ -11,6 +11,18 @@ named in the citation.
 | `hours` — Most flight hours | Time in a slot, with each session **clipped to the month**, so a sortie over midnight on the 1st is split between the two months. Open sessions, and reversed ones the bot leaves behind, don't count. |
 | `kd_aa` — Best K/D, air-to-air | Aircraft killed ÷ deaths to aircraft |
 | `kd_ag` — Best K/D, air-to-ground | Ground, SAM and ship kills ÷ deaths to those |
+
+**Campaign only.** Every category counts only inside one CreditSystem
+campaign:
+
+- its **servers** (`campaigns_servers`)
+- its **dates**: a campaign that began on the 12th counts from the 12th
+- pilots **registered** in it, meaning they have a `credits` row for that
+  campaign. Pilots who never joined it don't appear at all.
+
+That campaign is the one running now, or, when the board is posted just after
+a campaign ended, the latest one that ran during the month. Set `campaign_id`
+to pin one. The board names the campaign it covers.
 
 K/D sides are matched, so one Su-27 cannot sink a strike pilot's air-to-ground
 K/D. With no deaths, K/D equals the number of kills, as the bot itself does it.

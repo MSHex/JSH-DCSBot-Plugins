@@ -50,7 +50,9 @@ mapping:
       campaign_id:
         type: int
         nullable: false
-        desc: Count credits from this CreditSystem campaign only. Omit for every campaign.
+        desc: >-
+          The campaign the board covers. Omit to use the one running now (or,
+          after it ends, the latest one that ran during the month).
         example: "1"
       exclude_events:
         type: seq

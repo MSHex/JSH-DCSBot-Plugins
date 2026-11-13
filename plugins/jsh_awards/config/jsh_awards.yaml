@@ -19,7 +19,10 @@ DEFAULT:
   top: 3
   min_kills: 5
 
-  # campaign_id: 1                    # only this campaign's credits
+  # Everything counts only inside ONE campaign: its servers, its dates, and
+  # pilots registered in it (a CreditSystem credits row). By default that is
+  # the campaign running now; set campaign_id to pin one.
+  # campaign_id: 1
   exclude_events: [donation]
 
   # A logbook award (ribbon) for each winner, the month in its citation.

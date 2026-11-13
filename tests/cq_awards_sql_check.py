@@ -144,7 +144,39 @@ try:
     eq("ribbon given", q(db, cq.HAS_AWARD, ucid='A', aid=aid), [['1']])
     eq("TABLES sees greenieboard and logbook", run(cq.TABLES + ";", db), [['t', 't']])
 
-    # ---- awards: October 2026
+    # ---- awards: October 2026, campaign 1 on S1 only
+    run(f"""
+    INSERT INTO servers (server_name) VALUES ('S2');
+    INSERT INTO campaigns (id, name, start, stop) VALUES (2, 'old', '2024-01-01', '2024-06-05'),
+                                                         (3, 'next', '2024-06-10', '2024-08-01');
+    INSERT INTO campaigns_servers VALUES (1, 'S1'), (2, 'S1');
+    INSERT INTO players (ucid, discord_id, name) VALUES ('D', 40, 'Dog');
+    -- registered in campaign 1: A and C. D flies on S1 but never joined it.
+    INSERT INTO credits (campaign_id, player_ucid, points) VALUES (1, 'A', 100), (1, 'C', 300);
+    INSERT INTO missions (id, server_name, mission_name, mission_theatre, mission_start)
+        VALUES (2, 'S2', 'm', 'Caucasus', '2026-10-01');
+    INSERT INTO credits_log (campaign_id, event, player_ucid, old_points, new_points, time) VALUES
+        (1, 'points', 'D', 0, 5000, '2026-10-05');       -- not registered: out
+    INSERT INTO jsh_csar_rescues (server_name, player_ucid, player_name, pilot_status, rescues, rescued_at) VALUES
+        ('S2', 'A', 'Able', 'alive', 7, '2026-10-12'),    -- another server: out
+        ('S1', 'D', 'Dog', 'alive', 9, '2026-10-12');     -- not registered: out
+    INSERT INTO statistics (mission_id, player_ucid, slot, side, hop_on, hop_off,
+                            kills_planes, kills_helicopters, deaths_planes, deaths_helicopters,
+                            kills_ground, kills_sams, kills_ships, deaths_ground, deaths_sams, deaths_ships) VALUES
+        (2,'A','F-16C',2,'2026-10-20 10:00','2026-10-20 18:00', 50,0,0,0, 0,0,0, 0,0,0),  -- S2: out
+        (1,'D','F-16C',2,'2026-10-20 10:00','2026-10-20 18:00', 50,0,0,0, 0,0,0, 0,0,0);  -- not registered
+    """, db)
+    eq("CAMPAIGN: the running campaign overlapping October",
+       [r[0] for r in q(db, aw.CAMPAIGN, campaign_id=None,
+                        start=datetime(2026, 10, 1), end=datetime(2026, 11, 1))], ['1'])
+    eq("CAMPAIGN: a pinned campaign that did not run in October finds nothing",
+       q(db, aw.CAMPAIGN, campaign_id=2, start=datetime(2026, 10, 1), end=datetime(2026, 11, 1)), [])
+    eq("CAMPAIGN: an ENDED campaign is still found for its own month",
+       [r[0] for r in q(db, aw.CAMPAIGN, campaign_id=None,
+                        start=datetime(2024, 3, 1), end=datetime(2024, 4, 1))], ['2'])
+    eq("CAMPAIGN: two campaigns in one month -- the later one",
+       [r[0] for r in q(db, aw.CAMPAIGN, campaign_id=None,
+                        start=datetime(2024, 6, 1), end=datetime(2024, 7, 1))], ['3'])
     run(f"""
     INSERT INTO credits_log (campaign_id, event, player_ucid, old_points, new_points, time) VALUES
         (1, 'points',   'A', 0,   500, '2026-10-05'),
@@ -171,15 +203,15 @@ try:
         (1,'B','F-16C',2,'2026-09-10 10:00','2026-09-10 15:00', 9,0,0,0, 0,0,0, 0,0,0);
     """, db)
     M = dict(start=datetime(2026, 10, 1), end=datetime(2026, 11, 1), top=3,
-             exclude=['donation'], campaign_id=None)
-    eq("credits EARNED: gains only, transfers out, next month out",
+             exclude=['donation'], campaign_id=1)
+    eq("credits EARNED: gains only, transfers out, next month out, unregistered out",
        q(db, aw.CREDITS, **M), [['A', 'Able', '10', '600'], ['C', 'Charlie', '30', '300']])
     eq("credits: campaign filter", q(db, aw.CREDITS, **dict(M, campaign_id=2)), [])
-    eq("CSAR rescues in the month", q(db, aw.CSAR, **M),
+    eq("CSAR rescues in the month, campaign servers and registered pilots only", q(db, aw.CSAR, **M),
        [['C', 'Charlie', '30', '2'], ['A', 'Able', '10', '1']])
-    eq("hours clipped to the month; reversed, open and other months out",
+    eq("hours clipped to the month; reversed, open, other months, other servers, unregistered out",
        q(db, aw.HOURS, **M), [['A', 'Able', '10', '3.0'], ['C', 'Charlie', '30', '2.0']])
-    eq("A/A kills and deaths", q(db, aw.KD_AA, **M), [['A', 'Able', '10', '6', '1']])
+    eq("A/A kills and deaths, campaign servers and registered pilots only", q(db, aw.KD_AA, **M), [['A', 'Able', '10', '6', '1']])
     eq("A/G: the reversed session's kills still count -- kills are real, only its time is not",
        q(db, aw.KD_AG, **M), [['C', 'Charlie', '30', '10', '1']])
 

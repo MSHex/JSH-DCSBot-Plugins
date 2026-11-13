@@ -1,8 +1,38 @@
 """
 jsh_awards' queries. Tested against the bot's own DDL on a real PostgreSQL by
 tests/cq_awards_sql_check.py. Every timestamp is naive UTC, as the bot stores
-them; %(start)s and %(end)s bound one calendar month, end exclusive.
+them.
+
+Everything is scoped to ONE campaign:
+
+  * %(start)s / %(end)s are the month CLIPPED to the campaign's own dates, so
+    a campaign that began on the 12th only counts from the 12th;
+  * activity counts only on the campaign's servers (campaigns_servers);
+  * only pilots REGISTERED in the campaign appear -- those with a row in
+    CreditSystem's `credits` for it, which is how the bot enrols a player.
 """
+
+#: The campaign the board is for: the one given, else the one running now if
+#: it overlaps the month, else the latest one that overlaps it -- so a board
+#: posted on the 1st for a campaign that ended on the 31st still finds it.
+CAMPAIGN = """
+    SELECT id, name, start, stop
+      FROM campaigns
+     WHERE (%(campaign_id)s::int IS NULL OR id = %(campaign_id)s::int)
+       AND start < %(end)s
+       AND COALESCE(stop, 'infinity'::timestamp) > %(start)s
+     ORDER BY ((now() AT TIME ZONE 'utc') BETWEEN start
+               AND COALESCE(stop, 'infinity'::timestamp)) DESC,
+              start DESC
+     LIMIT 1
+"""
+
+_REGISTERED = """EXISTS (SELECT 1 FROM credits cr
+                     WHERE cr.campaign_id = %(campaign_id)s::int
+                       AND cr.player_ucid = p.ucid)"""
+_ON_CAMPAIGN_SERVER = """JOIN missions m ON m.id = s.mission_id
+      JOIN campaigns_servers cs ON cs.campaign_id = %(campaign_id)s::int
+                               AND cs.server_name = m.server_name"""
 
 #: Credits EARNED in the month: the gains in credits_log, not the balance --
 #: InactivityDecay's deductions, spending and voting costs are losses and do
@@ -16,18 +46,22 @@ CREDITS = """
      WHERE l.time >= %(start)s AND l.time < %(end)s
        AND l.new_points > l.old_points
        AND NOT (lower(l.event) = ANY(%(exclude)s::text[]))
-       AND (%(campaign_id)s::int IS NULL OR l.campaign_id = %(campaign_id)s::int)
+       AND l.campaign_id = %(campaign_id)s::int
+       AND {registered}
      GROUP BY l.player_ucid, p.name, p.discord_id
      ORDER BY value DESC, p.name
      LIMIT %(top)s
 """
 
-#: jsh_csar's own event log, every server and every CSAR script.
+#: jsh_csar's own event log, on the campaign's servers.
 CSAR = """
     SELECT r.player_ucid AS ucid, p.name, p.discord_id, SUM(r.rescues) AS value
       FROM jsh_csar_rescues r
       JOIN players p ON p.ucid = r.player_ucid
      WHERE r.rescued_at >= %(start)s AND r.rescued_at < %(end)s
+       AND r.server_name IN (SELECT server_name FROM campaigns_servers
+                              WHERE campaign_id = %(campaign_id)s::int)
+       AND {registered}
      GROUP BY r.player_ucid, p.name, p.discord_id
     HAVING SUM(r.rescues) > 0
      ORDER BY value DESC, p.name
@@ -45,7 +79,9 @@ HOURS = """
                   / 3600.0)::numeric, 1) AS value
       FROM statistics s
       JOIN players p ON p.ucid = s.player_ucid
+      {on_server}
      WHERE s.hop_off IS NOT NULL
+       AND {registered}
        AND s.hop_off >= s.hop_on
        AND s.hop_on < %(end)s AND s.hop_off > %(start)s
      GROUP BY s.player_ucid, p.name, p.discord_id
@@ -63,14 +99,22 @@ _KD = """
            SUM({kills})::int AS kills, SUM({deaths})::int AS deaths
       FROM statistics s
       JOIN players p ON p.ucid = s.player_ucid
+      {on_server}
      WHERE s.hop_on >= %(start)s AND s.hop_on < %(end)s
+       AND {registered}
      GROUP BY s.player_ucid, p.name, p.discord_id
     HAVING SUM({kills}) > 0
 """
 KD_AA = _KD.format(kills="s.kills_planes + s.kills_helicopters",
-                   deaths="s.deaths_planes + s.deaths_helicopters")
+                   deaths="s.deaths_planes + s.deaths_helicopters",
+                   registered=_REGISTERED, on_server=_ON_CAMPAIGN_SERVER)
 KD_AG = _KD.format(kills="s.kills_ground + s.kills_sams + s.kills_ships",
-                   deaths="s.deaths_ground + s.deaths_sams + s.deaths_ships")
+                   deaths="s.deaths_ground + s.deaths_sams + s.deaths_ships",
+                   registered=_REGISTERED, on_server=_ON_CAMPAIGN_SERVER)
+
+CREDITS = CREDITS.format(registered=_REGISTERED)
+CSAR = CSAR.format(registered=_REGISTERED)
+HOURS = HOURS.format(registered=_REGISTERED, on_server=_ON_CAMPAIGN_SERVER)
 
 TABLES = """
     SELECT to_regclass('credits_log') IS NOT NULL AS credits,

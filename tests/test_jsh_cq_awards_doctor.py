@@ -83,6 +83,15 @@ eq("parse nothing: last month", board.parse_month(None, date(2026, 11, 12)), dat
 eq("parse rubbish", board.parse_month('October', date(2026, 11, 12)), None)
 eq("parse month 13", board.parse_month('2026-13', date(2026, 11, 12)), None)
 
+MS, ME = datetime(2026, 10, 1), datetime(2026, 11, 1)
+eq("clip: a campaign running all month", board.clip(MS, ME, datetime(2026, 1, 1), None), (MS, ME))
+eq("clip: begun on the 12th counts from the 12th",
+   board.clip(MS, ME, datetime(2026, 10, 12), None), (datetime(2026, 10, 12), ME))
+eq("clip: ended on the 20th counts to the 20th",
+   board.clip(MS, ME, datetime(2026, 1, 1), datetime(2026, 10, 20)), (MS, datetime(2026, 10, 20)))
+eq("clip: ended before the month: nothing",
+   board.clip(MS, ME, datetime(2026, 1, 1), datetime(2026, 9, 30)), None)
+eq("clip: starts after the month: nothing", board.clip(MS, ME, datetime(2026, 11, 2), None), None)
 eq("K/D", board.kd(10, 4), 2.5)
 eq("K/D with no deaths is the kills, as the bot does it", board.kd(7, 0), 7.0)
 rows = [

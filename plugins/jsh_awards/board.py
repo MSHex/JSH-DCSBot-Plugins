@@ -26,6 +26,18 @@ def month_bounds(month: date) -> tuple[datetime, datetime]:
     return start, end
 
 
+def clip(month_start: datetime, month_end: datetime, campaign_start: datetime,
+         campaign_stop: Optional[datetime]) -> Optional[tuple[datetime, datetime]]:
+    """
+    The part of the month the campaign was running, or None if it never was.
+    A campaign that began on the 12th counts from the 12th; one that ended on
+    the 20th, up to the 20th.
+    """
+    start = max(month_start, campaign_start)
+    end = month_end if campaign_stop is None else min(month_end, campaign_stop)
+    return (start, end) if start < end else None
+
+
 def previous_month(today: date) -> date:
     return date(today.year - (today.month == 1), (today.month - 2) % 12 + 1, 1)
 

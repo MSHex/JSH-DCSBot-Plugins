@@ -9,14 +9,14 @@ schema;element_schema:
       nullable: false
       desc: Whether the coordinate conversion tool answers on this server.
       example: "true"
-    mark_roles:
+    unmark_roles:
       type: seq
       nullable: false
       desc: >-
-        Discord roles, by name or ID, allowed to place and remove F10 markers
-        from /coords convert. Default: DCS Admin and GameMaster. Converting
-        stays open to everyone.
-      example: "[DCS Admin, GameMaster]"
+        Discord roles, by name or ID, allowed to remove F10 markers with
+        /coords unmark. Default: Admin, DCS Admin and GameMaster. Placing a
+        marker is open to everyone.
+      example: "[Admin, DCS Admin, GameMaster]"
       sequence:
         - type: text
           nullable: false

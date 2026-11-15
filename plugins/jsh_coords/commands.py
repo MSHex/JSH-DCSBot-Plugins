@@ -12,9 +12,9 @@ from .listener import CoordsEventListener
 
 RUNNING = [Status.RUNNING, Status.PAUSED]
 
-#: Who may place a marker from Discord unless jsh_coords.yaml says otherwise.
-#: Converting stays open to everyone; writing on a live map does not.
-DEFAULT_MARK_ROLES = ['DCS Admin', 'GameMaster']
+#: Who may REMOVE a marker unless jsh_coords.yaml says otherwise. Placing one
+#: is open to everyone, like converting; deleting is staff's.
+DEFAULT_UNMARK_ROLES = ['Admin', 'DCS Admin', 'GameMaster']
 
 COALITIONS = {'all': 0, 'red': 1, 'blue': 2}
 
@@ -80,8 +80,8 @@ class Coords(Plugin[CoordsEventListener]):
         return await self.mission_request(
             server, f'mark({{request_id}}, {lua_num(x)}, {lua_num(z)}, {safe}, {int(coalition)})')
 
-    def may_mark(self, member, server: Server) -> bool:
-        roles = self.get_config(server).get('mark_roles') or DEFAULT_MARK_ROLES
+    def may_unmark(self, member, server: Server) -> bool:
+        roles = self.get_config(server).get('unmark_roles') or DEFAULT_UNMARK_ROLES
         names = {r.name for r in getattr(member, 'roles', [])}
         ids = {str(r.id) for r in getattr(member, 'roles', [])}
         return any(str(r) in names or str(r) in ids for r in roles)
@@ -111,11 +111,6 @@ class Coords(Plugin[CoordsEventListener]):
         if mark and not server:
             await interaction.followup.send(
                 "A marker needs a `server` to put it on. Pick one and try again.", ephemeral=True)
-            return
-        if mark and not self.may_mark(interaction.user, server):
-            await interaction.followup.send(
-                "You don't have a role allowed to place markers (`mark_roles` in jsh_coords.yaml).",
-                ephemeral=True)
             return
         if mark and not self.enabled(server):
             await interaction.followup.send(
@@ -185,9 +180,10 @@ class Coords(Plugin[CoordsEventListener]):
                      server: app_commands.Transform[Server, utils.ServerTransformer(status=RUNNING)],
                      marker_id: app_commands.Range[int, 7000000, 7999999]):
         await interaction.response.defer(ephemeral=True)
-        if not self.may_mark(interaction.user, server):
+        if not self.may_unmark(interaction.user, server):
             await interaction.followup.send(
-                "You don't have a role allowed to remove markers (`mark_roles` in jsh_coords.yaml).",
+                "Only Admin, DCS Admin and GameMaster can remove markers "
+                "(`unmark_roles` in jsh_coords.yaml).",
                 ephemeral=True)
             return
         reply = await self.mission_request(server, f'unmark({{request_id}}, {int(marker_id)})')

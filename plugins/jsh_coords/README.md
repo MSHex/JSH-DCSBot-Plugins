@@ -25,8 +25,8 @@ N 492601.48 E 81306.09
 | Command | Role |
 | --- | --- |
 | `/coords convert <coordinate> [server] [public]` | anyone |
-| `/coords convert <coordinate> server mark:True [comment] [coalition]` | `mark_roles` |
-| `/coords unmark <server> <marker_id>` | `mark_roles` |
+| `/coords convert <coordinate> server mark:True [comment] [coalition]` | anyone |
+| `/coords unmark <server> <marker_id>` | `unmark_roles` |
 
 The format is detected from what you paste — there is nothing to pick first.
 Spacing, the degree and minute marks, hemisphere letters before or after the
@@ -102,9 +102,10 @@ server:
   the mission's own markers.
 - Markers last until the mission ends.
 
-Only members with one of `mark_roles` can place or remove markers (by default
-`DCS Admin` and `GameMaster`). Converting stays open to everyone. Every marker
-is logged with who placed it.
+Anyone can place a marker. Only members with one of `unmark_roles` can remove
+one (by default `Admin`, `DCS Admin` and `GameMaster`). Every marker is logged
+with who placed it, so one placed by mistake or misuse can be traced and taken
+down.
 
 The marker functions arrived in 1.2. A bot restart loads them into missions
 that are already running, so no mission restart is needed.
@@ -163,7 +164,7 @@ the running mission on mission start and on bot restart.
 | Key | Meaning |
 | --- | --- |
 | `enabled` | Whether this server answers the mission half (metric, altitude, markers). On by default. Does not affect MGRS or lat/long. |
-| `mark_roles` | Discord roles (names or IDs) allowed to place and remove markers. Default: `DCS Admin`, `GameMaster`. |
+| `unmark_roles` | Discord roles (names or IDs) allowed to remove markers. Default: `Admin`, `DCS Admin`, `GameMaster`. Placing is open to everyone. |
 
 ## Tests
 

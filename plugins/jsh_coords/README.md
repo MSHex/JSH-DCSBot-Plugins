@@ -25,6 +25,8 @@ N 492601.48 E 81306.09
 | Command | Role |
 | --- | --- |
 | `/coords convert <coordinate> [server] [public]` | anyone |
+| `/coords convert <coordinate> server mark:True [comment] [coalition]` | `mark_roles` |
+| `/coords unmark <server> <marker_id>` | `mark_roles` |
 
 The format is detected from what you paste — there is nothing to pick first.
 Spacing, the degree and minute marks, hemisphere letters before or after the
@@ -81,6 +83,32 @@ them. Pass `server` to get them:
 Metric is reported with the theatre name in the footer, so a grid pasted from
 the wrong map is obvious rather than silently plausible.
 
+## Markers
+
+Add `mark:True` and the point is also put on the **F10 map** of the chosen
+server:
+
+```text
+/coords convert 32UMV1234567890 server:JSH Foothold Alpha mark:True comment:SA-11 site, unconfirmed coalition:blue
+```
+
+- `comment` is the text shown on the marker in game, up to 200 characters.
+  Without one, the marker shows the point's MGRS grid.
+- `coalition` sets who sees it: `all` (the default), `blue` or `red`.
+- The marker sits on the terrain and is **read-only**, so players can't edit or
+  delete it from the map.
+- The reply shows the marker's id. `/coords unmark` removes it, and refuses any
+  id outside the range this plugin uses, so it can never delete a player's or
+  the mission's own markers.
+- Markers last until the mission ends.
+
+Only members with one of `mark_roles` can place or remove markers (by default
+`DCS Admin` and `GameMaster`). Converting stays open to everyone. Every marker
+is logged with who placed it.
+
+The marker functions arrived in 1.2. A bot restart loads them into missions
+that are already running, so no mission restart is needed.
+
 ## Precision
 
 DCS **truncates** rather than rounds when it displays a coordinate: an internal
@@ -134,7 +162,8 @@ the running mission on mission start and on bot restart.
 
 | Key | Meaning |
 | --- | --- |
-| `enabled` | Whether this server answers the mission half (metric, altitude). On by default. Does not affect MGRS or lat/long. |
+| `enabled` | Whether this server answers the mission half (metric, altitude, markers). On by default. Does not affect MGRS or lat/long. |
+| `mark_roles` | Discord roles (names or IDs) allowed to place and remove markers. Default: `DCS Admin`, `GameMaster`. |
 
 ## Tests
 

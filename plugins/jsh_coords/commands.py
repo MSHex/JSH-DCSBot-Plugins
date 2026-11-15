@@ -5,12 +5,18 @@ import uuid
 from core import Plugin, Group, utils, Server, Status
 from discord import app_commands
 from services.bot import DCSServerBot
-from typing import Optional
+from typing import Literal, Optional
 
 from . import coords as cc
 from .listener import CoordsEventListener
 
 RUNNING = [Status.RUNNING, Status.PAUSED]
+
+#: Who may place a marker from Discord unless jsh_coords.yaml says otherwise.
+#: Converting stays open to everyone; writing on a live map does not.
+DEFAULT_MARK_ROLES = ['DCS Admin', 'GameMaster']
+
+COALITIONS = {'all': 0, 'red': 1, 'blue': 2}
 
 
 def lua_num(value: float) -> str:
@@ -41,10 +47,13 @@ class Coords(Plugin[CoordsEventListener]):
         request_id = uuid.uuid4().hex
         future = asyncio.get_running_loop().create_future()
         self.pending[request_id] = future
-        lua = (f'if not jsh_coords then dcsbot.sendBotTable({{ '
-               f'command = "jshCoordsResult", request_id = {lua_str(request_id)}, '
-               f'ok = false, error = "mission.lua is not loaded" }}) else '
-               f'jsh_coords.{call.format(request_id=lua_str(request_id))} end')
+        func = call.split('(', 1)[0]
+        fail = (f'dcsbot.sendBotTable({{ command = "jshCoordsResult", '
+                f'request_id = {lua_str(request_id)}, ok = false, error = %s }})')
+        lua = (f'if not jsh_coords then {fail % lua_str("mission.lua is not loaded")} '
+               f'elseif not jsh_coords.{func} then '
+               f'{fail % lua_str("mission.lua is out of date here; restart the bot or the mission")} '
+               f'else jsh_coords.{call.format(request_id=lua_str(request_id))} end')
         try:
             await server.send_to_dcs({"command": "jshCoordsRun", "lua": lua})
             return await asyncio.wait_for(future, timeout)
@@ -63,6 +72,20 @@ class Coords(Plugin[CoordsEventListener]):
         return await self.mission_request(
             server, f'fromMetric({{request_id}}, {lua_num(x)}, {lua_num(z)})')
 
+    async def place_mark(self, server: Server, x: float, z: float, text: str,
+                         coalition: int) -> dict:
+        # str.format runs over the call string, so braces in the comment
+        # must be doubled or they are taken as placeholders.
+        safe = lua_str(text).replace('{', '{{').replace('}', '}}')
+        return await self.mission_request(
+            server, f'mark({{request_id}}, {lua_num(x)}, {lua_num(z)}, {safe}, {int(coalition)})')
+
+    def may_mark(self, member, server: Server) -> bool:
+        roles = self.get_config(server).get('mark_roles') or DEFAULT_MARK_ROLES
+        names = {r.name for r in getattr(member, 'roles', [])}
+        ids = {str(r.id) for r in getattr(member, 'roles', [])}
+        return any(str(r) in names or str(r) in ids for r in roles)
+
     # ------------------------------------------------------------ commands
 
     coords_group = Group(name="coords", description="Convert between coordinate formats")
@@ -71,14 +94,34 @@ class Coords(Plugin[CoordsEventListener]):
     @app_commands.guild_only()
     @app_commands.describe(
         coordinate='MGRS, Lat/Long (any of the three forms), decimal degrees, or DCS metric X/Z',
-        server='Only needed for DCS metric X/Z and terrain altitude',
-        public='Post the result in the channel instead of only to you')
+        server='The server instance: needed for DCS metric X/Z, altitude, and markers',
+        public='Post the result in the channel instead of only to you',
+        mark='Also put a marker on the F10 map of the chosen server',
+        comment='Text shown on the marker in game (defaults to the MGRS grid)',
+        coalition='Who sees the marker (default: everyone)')
     async def convert(self, interaction: discord.Interaction, coordinate: str,
                       server: Optional[app_commands.Transform[
                           Server, utils.ServerTransformer(status=RUNNING)]] = None,
-                      public: bool = False):
+                      public: bool = False, mark: bool = False,
+                      comment: Optional[app_commands.Range[str, 1, 200]] = None,
+                      coalition: Literal['all', 'blue', 'red'] = 'all'):
         ephemeral = not public
         await interaction.response.defer(ephemeral=ephemeral)
+
+        if mark and not server:
+            await interaction.followup.send(
+                "A marker needs a `server` to put it on. Pick one and try again.", ephemeral=True)
+            return
+        if mark and not self.may_mark(interaction.user, server):
+            await interaction.followup.send(
+                "You don't have a role allowed to place markers (`mark_roles` in jsh_coords.yaml).",
+                ephemeral=True)
+            return
+        if mark and not self.enabled(server):
+            await interaction.followup.send(
+                f"Coords is disabled on {server.name} (see jsh_coords.yaml), so no marker.",
+                ephemeral=True)
+            return
 
         if server and not self.enabled(server):
             # The four terrain-independent formats still work, so carry on
@@ -107,7 +150,53 @@ class Coords(Plugin[CoordsEventListener]):
             return
 
         embed = self.build_embed(coordinate, point, metric, note, server)
+        if mark:
+            embed.add_field(name="F10 marker",
+                            value=await self.do_mark(interaction, server, point, metric,
+                                                     comment, coalition), inline=False)
         await interaction.followup.send(embed=embed, ephemeral=ephemeral)
+
+    async def do_mark(self, interaction: discord.Interaction, server: Server,
+                      point: cc.LatLon, metric: Optional[dict], comment: Optional[str],
+                      coalition: str) -> str:
+        """Places the marker; returns the line shown in the embed either way."""
+        if not metric or metric.get('x') is None:
+            return "❌ Not placed: the mission did not return map coordinates for this point."
+        if not comment:
+            try:
+                comment = utils.dd_to_mgrs(point.lat, point.lon)
+            except Exception:
+                comment = cc.to_ddm(point)
+        reply = await self.place_mark(server, metric['x'], metric['z'], comment,
+                                      COALITIONS.get(coalition, 0))
+        if not reply.get('ok'):
+            return f"❌ Not placed: {reply.get('error')}"
+        self.log.info(f"Coords: {interaction.user} placed marker {reply.get('mark_id')} on "
+                      f"{server.name} ({coalition}): {comment!r}")
+        seen = 'everyone' if coalition == 'all' else f'{coalition} coalition'
+        return (f"✅ Placed on **{server.name}** for {seen}: \"{comment}\" "
+                f"(id `{reply.get('mark_id')}`; read-only, gone at mission end)")
+
+    @coords_group.command(description='Remove a marker placed with /coords convert mark:True')
+    @app_commands.guild_only()
+    @app_commands.describe(server='The server the marker is on',
+                           marker_id='The id shown when the marker was placed')
+    async def unmark(self, interaction: discord.Interaction,
+                     server: app_commands.Transform[Server, utils.ServerTransformer(status=RUNNING)],
+                     marker_id: app_commands.Range[int, 7000000, 7999999]):
+        await interaction.response.defer(ephemeral=True)
+        if not self.may_mark(interaction.user, server):
+            await interaction.followup.send(
+                "You don't have a role allowed to remove markers (`mark_roles` in jsh_coords.yaml).",
+                ephemeral=True)
+            return
+        reply = await self.mission_request(server, f'unmark({{request_id}}, {int(marker_id)})')
+        if reply.get('ok'):
+            self.log.info(f"Coords: {interaction.user} removed marker {marker_id} on {server.name}")
+            await interaction.followup.send(f"Marker `{marker_id}` removed from {server.name}.",
+                                            ephemeral=True)
+        else:
+            await interaction.followup.send(f"Not removed: {reply.get('error')}", ephemeral=True)
 
     async def resolve(self, text: str, server: Optional[Server]) -> tuple[
             Optional[cc.LatLon], Optional[dict], Optional[str]]:

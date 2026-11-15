@@ -11,6 +11,9 @@
 
 DEFAULT:
   enabled: true
+  # Who may put markers on the F10 map with /coords convert mark:True, and
+  # remove them with /coords unmark. Role names or IDs.
+  mark_roles: [DCS Admin, GameMaster]
 
 # Opt one instance out. Its players can still convert MGRS and lat/long; they
 # just cannot ask that server for metric or altitude.

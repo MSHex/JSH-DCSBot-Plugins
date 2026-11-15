@@ -5,8 +5,10 @@
 -- terrain altitude depend on the loaded terrain's projection and heightmap, and
 -- nothing outside the mission can supply those.
 
-if jsh_coords then return end
-jsh_coords = {}
+-- Loading twice is safe and on purpose: the functions are simply redefined,
+-- so a bot restart brings a running mission up to date (the marker functions
+-- arrived in 1.2) without a mission restart. State survives in the table.
+jsh_coords = jsh_coords or {}
 local JC = jsh_coords
 
 -- Bind the bot's table explicitly, as DCSServerBot's own mission scripts do.
@@ -73,6 +75,43 @@ function JC.fromMetric(requestId, x, z)
   end
   reply(requestId, { ok = true, lat = lat, lon = lon, altitude = heightAt(x, z),
                      theatre = env.mission and env.mission.theatre or nil })
+end
+
+---------------------------------------------------------------- MARKERS
+
+-- Our own id range, far above what the mission editor, F10 players and
+-- Foothold hand out, with a random start so two bot restarts in one mission
+-- cannot reuse an id -- reusing one would silently REPLACE an earlier marker.
+JC.nextMark = JC.nextMark or (7000000 + math.random(0, 999) * 1000)
+
+--- A read-only F10 marker at map metres x/z.
+--- coalition: 1 red, 2 blue, anything else everyone.
+function JC.mark(requestId, x, z, text, coalitionId)
+  JC.nextMark = JC.nextMark + 1
+  local id = JC.nextMark
+  -- On the ground, not at sea level: the marker sits on the terrain.
+  local point = { x = x, y = heightAt(x, z) or 0, z = z }
+  local ok, err
+  if coalitionId == 1 or coalitionId == 2 then
+    ok, err = pcall(trigger.action.markToCoalition, id, text, point, coalitionId, true)
+  else
+    ok, err = pcall(trigger.action.markToAll, id, text, point, true)
+  end
+  if not ok then
+    return reply(requestId, { ok = false, error = "marker failed: " .. tostring(err) })
+  end
+  log("marker " .. id .. " placed: " .. text)
+  reply(requestId, { ok = true, mark_id = id })
+end
+
+--- Removes a marker this plugin placed. Ids outside our range are refused,
+--- so the command can never delete a player's or the mission's own marks.
+function JC.unmark(requestId, id)
+  if type(id) ~= "number" or id < 7000000 or id >= 8000000 then
+    return reply(requestId, { ok = false, error = "not a marker placed from Discord" })
+  end
+  local ok, err = pcall(trigger.action.removeMark, id)
+  reply(requestId, ok and { ok = true } or { ok = false, error = tostring(err) })
 end
 
 log("mission environment loaded")

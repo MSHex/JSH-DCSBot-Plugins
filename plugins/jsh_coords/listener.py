@@ -14,7 +14,8 @@ class CoordsEventListener(EventListener["Coords"]):
             await server.send_to_dcs({"command": "jshCoordsLoad"})
 
     # Covers a bot restart while a mission is already running.
-    # mission.lua ignores a second load, so this is safe.
+    # A second load just redefines mission.lua's functions, so this is safe -- and
+    # it is what brings a running mission up to date after a plugin update.
     @event(name="registerDCSServer")
     async def registerDCSServer(self, server: Server, data: dict) -> None:
         # No status check: DCS is registering, so DCS is there with a mission

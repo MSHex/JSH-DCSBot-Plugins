@@ -363,15 +363,40 @@ is ADDED before the old one is removed, that one update shows both ranks.
 
 ### `promotions`
 
+The rank-up is posted as an **embedded card**, with the pilot pinged above it:
+
+- the pilot's avatar and name
+- **"Promoted to Private First Class · E-3"**
+- "@pilot reached **E-3**."
+- an **Unlocked** section saying what the rank opens up
+- the rank's **insignia** on the right
+
 ```yaml
 promotions:
   channel: 123456789012345678
-  message: "Congratulations {mention}, you ranked up from {old_rank} to {new_rank}!"
+  title: "Promoted to {rank} · {new_code}"       # the default
+  description: "{mention} reached **{new_code}**."
+  unlocks:                                        # optional, per rank
+    E-3: "Post images, links and embeds"
+    E-5: "Members' Campaign and PvP servers, monthly module raffle"
+  insignia:                                       # optional image URL per rank
+    E-3: "https://example.com/insignia/e3.png"
+  colour: "#F1C40F"                               # optional
+  footer: "Fly safe, come home."                  # optional
 ```
 
-Placeholders: `{mention}` `{name}` `{old_rank}` `{new_rank}` `{old_code}`
-`{new_code}` (codes like `E-9`). A template with a mistake falls back to the
-default. Only the pilot is pinged, never a role or `@everyone`.
+- **Placeholders:** `{mention}` `{name}` `{old_rank}` `{new_rank}` `{old_code}`
+  `{new_code}`, plus `{rank}` (the new rank's name without its code, e.g.
+  `Private First Class`) and `{old}`.
+- **`unlocks` and `insignia`** are keyed by the rank's code (`E-3`) or its full
+  name. A rank with no unlock text shows no Unlocked section.
+- **Insignia fallback:** a rank with no insignia URL uses its Discord role's
+  icon, if the role has one.
+- **Bar colour:** `colour` if set, otherwise the rank role's own colour,
+  otherwise gold.
+- A template with a mistake falls back to the default.
+- Only the pilot is pinged, never a role or `@everyone`.
+- `style: text` posts the old plain `message` instead.
 
 Announced: an EARNED rank above the highest the pilot held. Not announced: a
 pilot's first rank, ranks re-earned after a campaign reset (which strips every

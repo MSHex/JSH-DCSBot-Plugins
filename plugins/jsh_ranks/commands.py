@@ -635,18 +635,50 @@ class Ranks(Plugin[RanksEventListener]):
             self.log.warning(f"JSH Ranks: promotion channel {channel_id} not found; "
                              f"{member.display_name}'s rank-up to {new} was not posted.")
             return
-        text = promotions.message(
-            settings.get('message'), mention=member.mention, name=member.display_name,
-            old_rank=old, new_rank=new,
-            old_code=promotions.code_of(old) or old, new_code=promotions.code_of(new) or new)
+        fields = promotions.fields_for(member.mention, member.display_name, old, new)
+        # Mention the pilot only: a template that names a role or @everyone
+        # must not ping the whole server.
+        allowed = discord.AllowedMentions(users=[member], roles=False, everyone=False)
         try:
-            # Mention the pilot only: a template that names a role or
-            # @everyone must not ping the whole server.
-            await channel.send(text, allowed_mentions=discord.AllowedMentions(
-                users=[member], roles=False, everyone=False))
+            if settings.get('style', 'embed') == 'text':
+                await channel.send(promotions.message(settings.get('message'), **fields),
+                                   allowed_mentions=allowed)
+            else:
+                await channel.send(member.mention, embed=self._promotion_embed(
+                    member, new, settings, fields), allowed_mentions=allowed)
         except discord.DiscordException as ex:
             self.log.warning(f"JSH Ranks: could not post {member.display_name}'s "
                              f"rank-up: {ex}")
+
+    def _promotion_embed(self, member: discord.Member, new: str, settings: dict,
+                         fields: dict) -> discord.Embed:
+        """
+        The rank-up card: the pilot's avatar and name, "Promoted to <rank> · <code>",
+        what the rank unlocks, and the rank's insignia on the right.
+        """
+        parts = promotions.embed_parts(settings, **fields)
+        role = self.bot.get_role(new)
+        colour = settings.get('colour')
+        if colour:
+            colour = discord.Colour(int(str(colour).lstrip('#'), 16))
+        elif role and role.colour.value:
+            colour = role.colour                    # the rank role's own colour
+        else:
+            colour = discord.Colour.gold()
+        embed = discord.Embed(title=parts['title'], description=parts['description'],
+                              colour=colour)
+        embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
+        if parts['unlocked']:
+            embed.add_field(name=settings.get('unlocked_label', 'Unlocked'),
+                            value=parts['unlocked'], inline=False)
+        # The insignia: a URL from config, else the rank role's own icon.
+        insignia = parts['insignia'] or (role.display_icon.url if role and
+                                         isinstance(role.display_icon, discord.Asset) else None)
+        if insignia:
+            embed.set_thumbnail(url=insignia)
+        if parts['footer']:
+            embed.set_footer(text=parts['footer'])
+        return embed
 
     async def reconcile_officer_roles(self, member: discord.Member) -> list[str]:
         """

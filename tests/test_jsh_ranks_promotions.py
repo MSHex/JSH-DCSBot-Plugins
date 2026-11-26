@@ -155,6 +155,22 @@ eq("a role that does not exist is reported", bad, ['Ghost Role'])
 eq("...and kept as written, so it is never mistaken for a real role",
    steps['O-1']['add'], ['101', 'Ghost Role'])
 
+# ------------------------------------------------------------ the embed
+E3 = 'Private First Class (E-3)'
+f = p.fields_for('<@7>', 'Pupster', 'Airman (E-2)', E3)
+eq("the bare rank name drops the code", f['rank'], 'Private First Class')
+parts = p.embed_parts({}, **f)
+eq("default title, like the screenshot", parts['title'], 'Promoted to Private First Class · E-3')
+eq("default description", parts['description'], '<@7> reached **E-3**.')
+eq("no unlocks configured, no Unlocked section", parts['unlocked'], None)
+parts = p.embed_parts({'unlocks': {'E-3': 'Post images, links and embeds'},
+                       'insignia': {E3: 'https://x/e3.png'}}, **f)
+eq("unlocks by code", parts['unlocked'], 'Post images, links and embeds')
+eq("insignia by full rank name", parts['insignia'], 'https://x/e3.png')
+eq("a broken title template falls back",
+   p.embed_parts({'title': 'Up to {nope}'}, **f)['title'], 'Promoted to Private First Class · E-3')
+eq("a rank with no code keeps its name", p.bare_name('Recruit'), 'Recruit')
+
 failed = [c for c in checks if not c[1]]
 for label, ok, detail in checks:
     if not ok:

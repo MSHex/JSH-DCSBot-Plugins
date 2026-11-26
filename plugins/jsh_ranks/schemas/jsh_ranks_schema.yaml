@@ -154,8 +154,68 @@ schema;element_schema:
           desc: >-
             The message. Placeholders: {mention} {name} {old_rank} {new_rank}
             {old_code} {new_code}. A template with a mistake falls back to the
-            default.
+            default. Used with style: text.
           example: "Congratulations {mention}, you ranked up from {old_rank} to {new_rank}!"
+        style:
+          type: str
+          nullable: false
+          enum: [embed, text]
+          desc: An embedded card (the default) or the plain text `message`.
+          example: embed
+        title:
+          type: str
+          nullable: false
+          desc: >-
+            The card's title. Placeholders as for message, plus {rank} (the new
+            rank without its code) and {old} (the old one).
+          example: "Promoted to {rank} · {new_code}"
+        description:
+          type: str
+          nullable: false
+          desc: The line under the title.
+          example: "{mention} reached **{new_code}**."
+        unlocks:
+          type: map
+          nullable: false
+          desc: >-
+            What each rank unlocks, shown under "Unlocked", keyed by code (E-3)
+            or full rank name. Ranks not listed show no Unlocked section.
+          example: "{E-5: 'Members campaign and PvP servers'}"
+          mapping:
+            regex;(.+):
+              type: str
+              nullable: false
+              desc: The text for this rank.
+              example: "Members campaign and PvP servers"
+        unlocked_label:
+          type: str
+          nullable: false
+          desc: The heading over the unlock text.
+          example: Unlocked
+        insignia:
+          type: map
+          nullable: false
+          desc: >-
+            An image URL per rank, shown on the right of the card, keyed by code
+            or full rank name. A rank not listed uses its Discord role's icon,
+            if it has one.
+          example: "{E-3: 'https://example.com/e3.png'}"
+          mapping:
+            regex;(.+):
+              type: str
+              nullable: false
+              desc: A direct image URL.
+              example: "https://example.com/e3.png"
+        colour:
+          type: str
+          nullable: false
+          desc: Bar colour as hex. Omit to use the rank role's colour, or gold.
+          example: "#F1C40F"
+        footer:
+          type: str
+          nullable: false
+          desc: Small text at the bottom of the card. Omit for none.
+          example: "Fly safe, come home."
     officer_roles:
       type: map
       nullable: false

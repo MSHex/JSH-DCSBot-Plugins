@@ -8,6 +8,9 @@ from typing import Any, Optional, cast
 from core import EventListener, Server, Status, event, chat_command
 from plugins.creditsystem.player import CreditPlayer
 
+from .streaks import (StreakRules, bonus as streak_bonus, ends_streak, excluded as streak_excluded,
+                      percent as streak_percent)
+
 #: One UDP datagram. DCS reads with LuaSocket's 8192-byte default and
 #: truncates anything larger without a word in either log.
 DATAGRAM_LIMIT = 8192
@@ -42,6 +45,9 @@ class CreditsEventListener(EventListener["Credits"]):
         #         'rows':    [jsh_credits_events.id, ...]}
         self.pending: dict[str, dict[str, Any]] = {}
         self.lock = asyncio.Lock()
+        # key -> consecutive sorties that ended in a PAID landing. Ended by a
+        # death, and per sortie_bonus by a slot change or disconnect.
+        self.streaks: dict[str, int] = {}
         # asyncio keeps only a WEAK reference to a running task, so a task that
         # nothing else holds can be garbage-collected before it finishes. The
         # injection was spawned bare, and registration is the busiest moment in
@@ -203,6 +209,17 @@ class CreditsEventListener(EventListener["Credits"]):
             await player.sendUserMessage(message.format(
                 points=points, total=total, reason=label), self._timeout(config))
 
+    def _streak_rules(self, server: Server) -> StreakRules:
+        config = self._config(server) or {}
+        return StreakRules.from_config(config.get('sortie_bonus') or {})
+
+    def _end_streak(self, server: Server, ucid: str, why: str) -> None:
+        key = self._key(server, ucid)
+        if key in self.streaks and ends_streak(why, self._streak_rules(server)):
+            self.log.debug(f"JSH Credits: streak of {self.streaks[key]} ended for "
+                           f"{ucid} on {server.name} ({why})")
+            self.streaks.pop(key, None)
+
     async def _drop(self, server: Server, ucid: str, why: str) -> None:
         """
         End a sortie that never made it home.
@@ -215,6 +232,9 @@ class CreditsEventListener(EventListener["Credits"]):
         with, so "earned vs collected" still measures what RTB collected. The
         partial is its own credits_log row instead.
         """
+        # Before anything can return early: a pilot who dies with nothing
+        # pending still loses the streak.
+        self._end_streak(server, ucid, why)
         key = self._key(server, ucid)
         async with self.lock:
             bucket = self.pending.pop(key, None)
@@ -263,6 +283,8 @@ class CreditsEventListener(EventListener["Credits"]):
             keys = [k for k in self.pending if k.startswith(prefix)]
             for key in keys:
                 self.pending.pop(key, None)
+            for key in [k for k in self.streaks if k.startswith(prefix)]:
+                self.streaks.pop(key, None)
         if keys:
             self.log.debug(f"JSH Credits: cleared {len(keys)} pending bucket(s) "
                            f"on {server.name} ({why})")
@@ -330,11 +352,43 @@ class CreditsEventListener(EventListener["Credits"]):
 
         self.log.info(f"JSH Credits: paid {player.name} {points} on {server.name} ({remark})")
 
+        # The sortie streak: this landing paid, so it counts -- unless the
+        # aircraft is excluded, in which case the streak is left exactly as it
+        # was: neither counted nor reset.
+        rules = self._streak_rules(server)
+        if streak_excluded(rules, getattr(player, 'unit_type', ''),
+                           getattr(player, 'unit_display_name', '')):
+            streak, extra, pct = self.streaks.get(key, 0), 0, 0.0
+        else:
+            streak = self.streaks.get(key, 0) + 1
+            self.streaks[key] = streak
+            extra = streak_bonus(points, streak, rules)
+            pct = streak_percent(streak, rules)
+        if extra > 0:
+            before_bonus = player.points
+            player.points += extra
+            await player.audit(config.get('sortie_bonus', {}).get('event', 'streak_bonus'),
+                               before_bonus,
+                               f"sortie streak {streak}: +{pct:g}% of {points}")
+            self.log.info(f"JSH Credits: streak bonus {extra} for {player.name} "
+                          f"(sortie {streak}, {pct:g}%) on {server.name}")
+
         message = self._message(config, 'paid')
         if message:
             await player.sendUserMessage(message.format(
                 points=points, old_points=old_points, new_points=player.points,
-                place=place or 'base', reason=detail), self._timeout(config))
+                place=place or 'base', reason=detail, bonus=extra, streak=streak,
+                bonus_percent=f"{pct:g}"), self._timeout(config))
+        streak_message = self._message(
+            config, 'streak', "Sortie streak {streak}: +{bonus} bonus credits ({bonus_percent}%).") \
+            if extra > 0 else ''
+        if streak_message:
+            try:
+                text = streak_message.format(bonus=extra, streak=streak, bonus_percent=f"{pct:g}",
+                                             points=points, new_points=player.points)
+            except (KeyError, IndexError, ValueError):
+                text = f"Sortie streak {streak}: +{extra} bonus ({pct:g}%)."
+            await player.sendUserMessage(text, self._timeout(config))
 
     # ------------------------------------------------------------------
     # kill scoring

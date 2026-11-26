@@ -162,11 +162,11 @@ eq("the bare rank name drops the code", f['rank'], 'Private First Class')
 parts = p.embed_parts({}, **f)
 eq("default title, like the screenshot", parts['title'], 'Promoted to Private First Class · E-3')
 eq("default description", parts['description'], '<@7> reached **E-3**.')
-eq("no unlocks configured, no Unlocked section", parts['unlocked'], None)
-parts = p.embed_parts({'unlocks': {'E-3': 'Post images, links and embeds'},
-                       'insignia': {E3: 'https://x/e3.png'}}, **f)
-eq("unlocks by code", parts['unlocked'], 'Post images, links and embeds')
-eq("insignia by full rank name", parts['insignia'], 'https://x/e3.png')
+eq("no override, no insignia from config (the badge is used)", parts['insignia'], None)
+eq("an override by full rank name",
+   p.embed_parts({'insignia': {E3: 'https://x/e3.png'}}, **f)['insignia'], 'https://x/e3.png')
+eq("an override by code", p.embed_parts({'insignia': {'E-3': 'https://x/c.png'}}, **f)['insignia'],
+   'https://x/c.png')
 eq("a broken title template falls back",
    p.embed_parts({'title': 'Up to {nope}'}, **f)['title'], 'Promoted to Private First Class · E-3')
 eq("a rank with no code keeps its name", p.bare_name('Recruit'), 'Recruit')

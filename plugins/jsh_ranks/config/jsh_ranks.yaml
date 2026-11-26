@@ -207,18 +207,16 @@ DEFAULT:
   #
   # Placeholders: {mention} {name} {old_rank} {new_rank} {old_code} {new_code}
   # The post is an embedded card by default: the pilot's avatar and name,
-  # "Promoted to <rank> · <code>", what the rank unlocks, and the insignia on
-  # the right. {rank} is the new rank without its code ("Private First Class").
+  # "Promoted to <rank> · <code>", and the insignia on the right -- the rank's
+  # own badge.img from creditsystem.yaml (earned ranks) or granted_ranks below,
+  # so nothing needs setting. {rank} is the new rank without its code.
   # style: text posts the plain `message` instead.
   # promotions:
   #   channel: 123456789012345678
   #   title: "Promoted to {rank} · {new_code}"
   #   description: "{mention} reached **{new_code}**."
-  #   unlocks:                       # optional, per rank (code or full name)
-  #     E-5: "Members' campaign and PvP servers"
-  #     O-1: "Officer channels"
-  #   insignia:                      # optional image URL per rank; else the role's icon
-  #     E-3: "https://example.com/insignia/e3.png"
+  #   # insignia:                    # only to OVERRIDE a rank's badge image
+  #   #   E-3: "https://example.com/insignia/e3.png"
   #   # colour: "#F1C40F"           # else the rank role's colour, else gold
   #   # footer: "Fly safe, come home."
   #   # style: text

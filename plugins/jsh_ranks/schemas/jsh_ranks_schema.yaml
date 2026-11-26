@@ -174,31 +174,14 @@ schema;element_schema:
           nullable: false
           desc: The line under the title.
           example: "{mention} reached **{new_code}**."
-        unlocks:
-          type: map
-          nullable: false
-          desc: >-
-            What each rank unlocks, shown under "Unlocked", keyed by code (E-3)
-            or full rank name. Ranks not listed show no Unlocked section.
-          example: "{E-5: 'Members campaign and PvP servers'}"
-          mapping:
-            regex;(.+):
-              type: str
-              nullable: false
-              desc: The text for this rank.
-              example: "Members campaign and PvP servers"
-        unlocked_label:
-          type: str
-          nullable: false
-          desc: The heading over the unlock text.
-          example: Unlocked
         insignia:
           type: map
           nullable: false
           desc: >-
-            An image URL per rank, shown on the right of the card, keyed by code
-            or full rank name. A rank not listed uses its Discord role's icon,
-            if it has one.
+            Overrides the image on the right of the card, per rank, keyed by
+            code or full rank name. Not needed normally: a rank uses its own
+            badge.img from creditsystem.yaml (earned) or granted_ranks
+            (granted), then its Discord role's icon.
           example: "{E-3: 'https://example.com/e3.png'}"
           mapping:
             regex;(.+):

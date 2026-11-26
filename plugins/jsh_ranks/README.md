@@ -368,18 +368,16 @@ The rank-up is posted as an **embedded card**, with the pilot pinged above it:
 - the pilot's avatar and name
 - **"Promoted to Private First Class · E-3"**
 - "@pilot reached **E-3**."
-- an **Unlocked** section saying what the rank opens up
-- the rank's **insignia** on the right
+- the rank's **insignia** on the right, taken from its own `badge.img` in
+  `creditsystem.yaml`, or in `granted_ranks` for a granted rank. This is the
+  same artwork `/pilot status` shows, so nothing needs setting.
 
 ```yaml
 promotions:
   channel: 123456789012345678
   title: "Promoted to {rank} · {new_code}"       # the default
   description: "{mention} reached **{new_code}**."
-  unlocks:                                        # optional, per rank
-    E-3: "Post images, links and embeds"
-    E-5: "Members' Campaign and PvP servers, monthly module raffle"
-  insignia:                                       # optional image URL per rank
+  insignia:                                       # optional OVERRIDE per rank
     E-3: "https://example.com/insignia/e3.png"
   colour: "#F1C40F"                               # optional
   footer: "Fly safe, come home."                  # optional
@@ -388,10 +386,11 @@ promotions:
 - **Placeholders:** `{mention}` `{name}` `{old_rank}` `{new_rank}` `{old_code}`
   `{new_code}`, plus `{rank}` (the new rank's name without its code, e.g.
   `Private First Class`) and `{old}`.
-- **`unlocks` and `insignia`** are keyed by the rank's code (`E-3`) or its full
-  name. A rank with no unlock text shows no Unlocked section.
-- **Insignia fallback:** a rank with no insignia URL uses its Discord role's
-  icon, if the role has one.
+- **Where the insignia comes from**, in order:
+  1. `insignia`, keyed by code (`E-3`) or full rank name. This is only needed
+     to override a rank's image.
+  2. The rank's `badge.img`.
+  3. The rank role's Discord icon.
 - **Bar colour:** `colour` if set, otherwise the rank role's own colour,
   otherwise gold.
 - A template with a mistake falls back to the default.

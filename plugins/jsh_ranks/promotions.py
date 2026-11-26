@@ -83,8 +83,8 @@ def fields_for(member_mention: str, name: str, old: str, new: str) -> dict:
 
 def per_rank(table: Optional[dict], new: str) -> Optional[str]:
     """
-    A per-rank value -- an unlock text or an insignia URL -- looked up by the
-    rank's code (E-3) or its full name, whichever the config used.
+    A per-rank value -- an insignia URL -- looked up by the rank's code (E-3)
+    or its full name, whichever the config used.
     """
     table = table or {}
     for key in (code_of(new), new, bare_name(new)):
@@ -95,9 +95,9 @@ def per_rank(table: Optional[dict], new: str) -> Optional[str]:
 
 def embed_parts(settings: dict, **fields) -> dict:
     """
-    Title, description, unlock text and footer for the rank-up embed, each
-    formatted with `fields`. A template with a mistake falls back to the
-    default rather than costing the announcement.
+    Title, description and footer for the rank-up embed, each formatted with
+    `fields`, and any insignia URL set in jsh_ranks.yaml. A template with a
+    mistake falls back to the default rather than costing the announcement.
     """
     def fmt(template, default):
         try:
@@ -105,11 +105,9 @@ def embed_parts(settings: dict, **fields) -> dict:
         except (KeyError, IndexError, ValueError):
             return default.format(**fields) if default else ''
 
-    unlocked = per_rank(settings.get('unlocks'), fields['new_rank'])
     return {
         'title': fmt(settings.get('title'), DEFAULT_TITLE)[:256],
         'description': fmt(settings.get('description'), DEFAULT_DESCRIPTION)[:4096],
-        'unlocked': fmt(unlocked, '')[:1024] if unlocked else None,
         'footer': fmt(settings.get('footer'), '')[:2048] if settings.get('footer') else None,
         'insignia': per_rank(settings.get('insignia'), fields['new_rank']),
     }

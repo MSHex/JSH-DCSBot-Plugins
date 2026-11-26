@@ -1,0 +1,93 @@
+schema;element_schema:
+  type: map
+  func: is_element
+  nullable: false
+  desc: Logistics rewards for every instance, or one.
+  mapping:
+    enabled:
+      type: bool
+      nullable: false
+      desc: Whether this server reports and pays logistics rewards.
+      example: "true"
+    announce_in_game:
+      type: bool
+      nullable: false
+      desc: Show the pilot a message in game when they are paid.
+      example: "true"
+    deliveries:
+      type: map
+      nullable: false
+      desc: >-
+        Server credits per Foothold delivery, keyed by Foothold's own stat
+        name. * is a wildcard ("Built *" covers every CTLD build); an exact
+        name beats a wildcard. List only what you change -- the rest keep
+        their defaults. 0 switches one off.
+      example: "{Zone capture: 50, Warehouse delivery: 25, Built *: 30}"
+      mapping:
+        regex;(.+):
+          type: int
+          nullable: false
+          range: {min: 0}
+          desc: Credits for one of this delivery.
+          example: "25"
+    airtime:
+      type: map
+      nullable: false
+      desc: Credits for time flown in a logistics aircraft, paid on landing.
+      mapping:
+        enabled:
+          type: bool
+          nullable: false
+          desc: Pay for airtime on this server.
+          example: "true"
+        minutes:
+          type: float
+          nullable: false
+          range: {min: 0.1}
+          desc: How many airborne minutes earn one payment.
+          example: "1"
+        credits:
+          type: int
+          nullable: false
+          range: {min: 0}
+          desc: Credits per `minutes` flown.
+          example: "1"
+        aircraft:
+          type: seq
+          nullable: false
+          desc: DCS type names that count as logistics aircraft, case-insensitive.
+          example: "[C-130J-30, CH-47Fbl1, UH-1H, Mi-8MT]"
+          sequence:
+            - type: str
+              nullable: false
+              desc: A DCS unit type name.
+              example: CH-47Fbl1
+        sample_seconds:
+          type: int
+          nullable: false
+          range: {min: 2}
+          desc: How often the mission checks who is airborne. Time is counted in these steps.
+          example: "10"
+
+schema;instance_schema:
+  type: map
+  func: is_node
+  nullable: false
+  desc: Applies to one instance only.
+  mapping:
+    regex;(.+):
+      include: 'element_schema'
+
+type: map
+func: check_main_structure
+nullable: false
+mapping:
+  DEFAULT:
+    include: 'element_schema'
+  commands:
+    include: 'commands_schema'
+  regex;(.+):
+    type: any
+    func: any_of
+    nullable: false
+    enum: ['element_schema', 'instance_schema']

@@ -109,6 +109,9 @@ DEFAULT:
     same_aircraft: true     # changing slot ends the streak, as in Foothold
     keep_on_disconnect: false
     event: streak_bonus
+    # Optional: aircraft left out of the streak entirely -- no bonus, no count,
+    # no reset. Names as the Mission Editor shows them (or DCS type names).
+    # exclude_aircraft: [C-130J-30, CH-47F, UH-1H, Mi-8MTV2]
 
   # ----------------------------------------------------- credits_log remark
   #

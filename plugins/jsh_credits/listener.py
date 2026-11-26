@@ -8,7 +8,8 @@ from typing import Any, Optional, cast
 from core import EventListener, Server, Status, event, chat_command
 from plugins.creditsystem.player import CreditPlayer
 
-from .streaks import StreakRules, bonus as streak_bonus, ends_streak, percent as streak_percent
+from .streaks import (StreakRules, bonus as streak_bonus, ends_streak, excluded as streak_excluded,
+                      percent as streak_percent)
 
 #: One UDP datagram. DCS reads with LuaSocket's 8192-byte default and
 #: truncates anything larger without a word in either log.
@@ -351,12 +352,18 @@ class CreditsEventListener(EventListener["Credits"]):
 
         self.log.info(f"JSH Credits: paid {player.name} {points} on {server.name} ({remark})")
 
-        # The sortie streak: this landing paid, so it counts.
+        # The sortie streak: this landing paid, so it counts -- unless the
+        # aircraft is excluded, in which case the streak is left exactly as it
+        # was: neither counted nor reset.
         rules = self._streak_rules(server)
-        streak = self.streaks.get(key, 0) + 1
-        self.streaks[key] = streak
-        extra = streak_bonus(points, streak, rules)
-        pct = streak_percent(streak, rules)
+        if streak_excluded(rules, getattr(player, 'unit_type', ''),
+                           getattr(player, 'unit_display_name', '')):
+            streak, extra, pct = self.streaks.get(key, 0), 0, 0.0
+        else:
+            streak = self.streaks.get(key, 0) + 1
+            self.streaks[key] = streak
+            extra = streak_bonus(points, streak, rules)
+            pct = streak_percent(streak, rules)
         if extra > 0:
             before_bonus = player.points
             player.points += extra

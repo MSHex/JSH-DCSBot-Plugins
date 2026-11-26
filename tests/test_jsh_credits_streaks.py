@@ -47,6 +47,15 @@ eq("...unless keep_on_disconnect",
    st.ends_streak('disconnect', st.StreakRules.from_config({'keep_on_disconnect': True})), False)
 eq("an unknown reason leaves it", st.ends_streak('something else', R), False)
 
+X = st.StreakRules.from_config({'exclude_aircraft': ['CH-47F', 'Mi-8MTV2', 'F/A-18C', 'c-130j-30']})
+eq("ME name matches the display name", st.excluded(X, 'CH-47Fbl1', 'CH-47F'), True)
+eq("ME name, display only: the Hip", st.excluded(X, 'Mi-8MT', 'Mi-8MTV2'), True)
+eq("punctuation and case ignored", st.excluded(X, 'FA-18C_hornet', 'F/A-18C'), True)
+eq("a DCS type name works too", st.excluded(X, 'C-130J-30', ''), True)
+eq("an aircraft not listed is not excluded", st.excluded(X, 'F-16C_50', 'F-16CM bl.50'), False)
+eq("no list, nothing excluded", st.excluded(R, 'CH-47Fbl1', 'CH-47F'), False)
+eq("an ME name is not matched as a mere prefix", st.excluded(X, 'CH-47Fbl1', 'CH-47Fbl1'), False)
+
 failed = [x for x in results if not x[1]]
 for label, ok, detail in failed:
     print(' FAIL ', label, '--', detail)

@@ -225,6 +225,24 @@ DEFAULT:
     keep_on_disconnect: false
 ```
 
+**Excluding aircraft (optional).** Leave certain types out, for example
+logistics aircraft, which already earn through `jsh_logistics`:
+
+```yaml
+  sortie_bonus:
+    exclude_aircraft: [C-130J-30, CH-47F, UH-1H, Mi-8MTV2]
+```
+
+- Write names **as the Mission Editor shows them**. DCS's internal type names
+  work too.
+- Each entry is matched against both the unit's display name and its type,
+  ignoring case, spaces and punctuation. So `CH-47F` and `CH-47Fbl1` are the
+  same Chinook, `Mi-8MTV2` and `Mi-8MT` the same Hip, and `F/A-18C` matches
+  the Hornet.
+- A landing in an excluded aircraft earns no bonus and doesn't count, but it
+  doesn't reset the streak either. With `same_aircraft: true`, switching into
+  that aircraft is a slot change, which resets it anyway.
+
 Every value can be set per instance. Streaks live in memory, so a bot restart
 starts everyone at zero.
 

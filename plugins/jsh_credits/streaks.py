@@ -14,7 +14,9 @@ crashing resets it. Imports nothing from the bot, so it can be tested alone.
 A "sortie" here is a landing that PAID something. Landing with nothing
 pending neither counts nor resets, so touch-and-goes cannot farm a streak.
 """
-from dataclasses import dataclass
+import re
+
+from dataclasses import dataclass, field
 
 #: How a sortie can end without a landing. Each always ends the streak.
 LOSSES = ('crash', 'eject', 'pilot_death', 'self_kill')
@@ -29,6 +31,7 @@ class StreakRules:
     min_sorties: int = 2            # the streak length that earns the base bonus
     same_aircraft: bool = True      # a slot change ends the streak, as in Foothold
     keep_on_disconnect: bool = False
+    exclude_aircraft: tuple = field(default_factory=tuple)
 
     @classmethod
     def from_config(cls, cfg: dict) -> 'StreakRules':
@@ -40,7 +43,26 @@ class StreakRules:
                    max_percent=max(0.0, float(cfg.get('max_percent', d.max_percent))),
                    min_sorties=max(1, int(cfg.get('min_sorties', d.min_sorties))),
                    same_aircraft=bool(cfg.get('same_aircraft', d.same_aircraft)),
-                   keep_on_disconnect=bool(cfg.get('keep_on_disconnect', d.keep_on_disconnect)))
+                   keep_on_disconnect=bool(cfg.get('keep_on_disconnect', d.keep_on_disconnect)),
+                   exclude_aircraft=tuple(str(a) for a in (cfg.get('exclude_aircraft') or [])))
+
+
+def _norm(name: str) -> str:
+    """'F/A-18C', 'fa-18c' and 'FA 18C' are the same: letters and digits only, lower case."""
+    return re.sub(r'[^a-z0-9]', '', str(name or '').lower())
+
+
+def excluded(rules: StreakRules, unit_type: str, display_name: str = '') -> bool:
+    """
+    Whether this aircraft is left out of the streak altogether.
+
+    Names may be written as the Mission Editor shows them ('CH-47F',
+    'Mi-8MTV2', 'F/A-18C') or as DCS's internal type ('CH-47Fbl1', 'Mi-8MT',
+    'FA-18C_hornet'): each entry is matched against BOTH the unit's type and
+    its display name, ignoring case, spaces and punctuation.
+    """
+    wanted = {_norm(a) for a in rules.exclude_aircraft if _norm(a)}
+    return bool(wanted) and (_norm(unit_type) in wanted or _norm(display_name) in wanted)
 
 
 def percent(streak: int, rules: StreakRules) -> float:

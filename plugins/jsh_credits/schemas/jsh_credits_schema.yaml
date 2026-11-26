@@ -158,6 +158,20 @@ schema;element_schema:
           nullable: false
           desc: credits_log event the bonus is written under, separate from 'rtb'.
           example: streak_bonus
+        exclude_aircraft:
+          type: seq
+          nullable: false
+          desc: >-
+            Aircraft left out of the streak: a landing in one neither earns a
+            bonus nor counts, and does not reset the streak either. Write names
+            as the Mission Editor shows them (CH-47F, Mi-8MTV2) or as DCS type
+            names (CH-47Fbl1); case, spaces and punctuation are ignored.
+          example: "[C-130J-30, CH-47F, UH-1H, Mi-8MTV2]"
+          sequence:
+            - type: str
+              nullable: false
+              desc: An aircraft, by Mission Editor name or DCS type name.
+              example: CH-47F
     remark_detail:
       type: int
       nullable: false

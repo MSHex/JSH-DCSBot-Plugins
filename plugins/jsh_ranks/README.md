@@ -363,15 +363,39 @@ is ADDED before the old one is removed, that one update shows both ranks.
 
 ### `promotions`
 
+The rank-up is posted as an **embedded card**, with the pilot pinged above it:
+
+- the pilot's avatar and name
+- **"Promoted to Private First Class · E-3"**
+- "@pilot reached **E-3**."
+- the rank's **insignia** on the right, taken from its own `badge.img` in
+  `creditsystem.yaml`, or in `granted_ranks` for a granted rank. This is the
+  same artwork `/pilot status` shows, so nothing needs setting.
+
 ```yaml
 promotions:
   channel: 123456789012345678
-  message: "Congratulations {mention}, you ranked up from {old_rank} to {new_rank}!"
+  title: "Promoted to {rank} · {new_code}"       # the default
+  description: "{mention} reached **{new_code}**."
+  insignia:                                       # optional OVERRIDE per rank
+    E-3: "https://example.com/insignia/e3.png"
+  colour: "#F1C40F"                               # optional
+  footer: "Fly safe, come home."                  # optional
 ```
 
-Placeholders: `{mention}` `{name}` `{old_rank}` `{new_rank}` `{old_code}`
-`{new_code}` (codes like `E-9`). A template with a mistake falls back to the
-default. Only the pilot is pinged, never a role or `@everyone`.
+- **Placeholders:** `{mention}` `{name}` `{old_rank}` `{new_rank}` `{old_code}`
+  `{new_code}`, plus `{rank}` (the new rank's name without its code, e.g.
+  `Private First Class`) and `{old}`.
+- **Where the insignia comes from**, in order:
+  1. `insignia`, keyed by code (`E-3`) or full rank name. This is only needed
+     to override a rank's image.
+  2. The rank's `badge.img`.
+  3. The rank role's Discord icon.
+- **Bar colour:** `colour` if set, otherwise the rank role's own colour,
+  otherwise gold.
+- A template with a mistake falls back to the default.
+- Only the pilot is pinged, never a role or `@everyone`.
+- `style: text` posts the old plain `message` instead.
 
 Announced: an EARNED rank above the highest the pilot held. Not announced: a
 pilot's first rank, ranks re-earned after a campaign reset (which strips every

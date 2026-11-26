@@ -64,6 +64,55 @@ def promotion(earned: list, before: Iterable[str],
     return old, new
 
 
+#: Defaults for the embed. {rank} is the rank's name without its code.
+DEFAULT_TITLE = 'Promoted to {rank} · {new_code}'
+DEFAULT_DESCRIPTION = '{mention} reached **{new_code}**.'
+
+
+def bare_name(rank: str) -> str:
+    """'Private First Class (E-3)' -> 'Private First Class'."""
+    return _CODE.sub('', str(rank or '')).strip() or str(rank or '')
+
+
+def fields_for(member_mention: str, name: str, old: str, new: str) -> dict:
+    """Every placeholder a template may use."""
+    return dict(mention=member_mention, name=name, old_rank=old, new_rank=new,
+                old_code=code_of(old) or old, new_code=code_of(new) or new,
+                rank=bare_name(new), old=bare_name(old))
+
+
+def per_rank(table: Optional[dict], new: str) -> Optional[str]:
+    """
+    A per-rank value -- an insignia URL -- looked up by the rank's code (E-3)
+    or its full name, whichever the config used.
+    """
+    table = table or {}
+    for key in (code_of(new), new, bare_name(new)):
+        if key and key in table and table[key]:
+            return str(table[key])
+    return None
+
+
+def embed_parts(settings: dict, **fields) -> dict:
+    """
+    Title, description and footer for the rank-up embed, each formatted with
+    `fields`, and any insignia URL set in jsh_ranks.yaml. A template with a
+    mistake falls back to the default rather than costing the announcement.
+    """
+    def fmt(template, default):
+        try:
+            return (template or default).format(**fields)
+        except (KeyError, IndexError, ValueError):
+            return default.format(**fields) if default else ''
+
+    return {
+        'title': fmt(settings.get('title'), DEFAULT_TITLE)[:256],
+        'description': fmt(settings.get('description'), DEFAULT_DESCRIPTION)[:4096],
+        'footer': fmt(settings.get('footer'), '')[:2048] if settings.get('footer') else None,
+        'insignia': per_rank(settings.get('insignia'), fields['new_rank']),
+    }
+
+
 def message(template: Optional[str], **fields) -> str:
     """
     The announcement, from a template in config.

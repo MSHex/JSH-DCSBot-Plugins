@@ -206,9 +206,21 @@ DEFAULT:
   # the channel after every reset). Leave `channel` out to post nothing.
   #
   # Placeholders: {mention} {name} {old_rank} {new_rank} {old_code} {new_code}
+  # The post is an embedded card by default: the pilot's avatar and name,
+  # "Promoted to <rank> · <code>", and the insignia on the right -- the rank's
+  # own badge.img from creditsystem.yaml (earned ranks) or granted_ranks below,
+  # so nothing needs setting. {rank} is the new rank without its code.
+  # style: text posts the plain `message` instead.
   # promotions:
   #   channel: 123456789012345678
-  #   message: "Congratulations {mention}, you ranked up from {old_rank} to {new_rank}!"
+  #   title: "Promoted to {rank} · {new_code}"
+  #   description: "{mention} reached **{new_code}**."
+  #   # insignia:                    # only to OVERRIDE a rank's badge image
+  #   #   E-3: "https://example.com/insignia/e3.png"
+  #   # colour: "#F1C40F"           # else the rank role's colour, else gold
+  #   # footer: "Fly safe, come home."
+  #   # style: text
+  #   # message: "Congratulations {mention}, you ranked up from {old_rank} to {new_rank}!"
 
   # ------------------------------------------------------- officer roles
   # Extra Discord roles by rank band, keyed by the code in the rank's name.

@@ -21,9 +21,9 @@ class CreditsEventListener(EventListener["Credits"]):
     landing at a friendly airbase or FARP, and dropped on crash, eject, pilot
     death, slot change, disconnect or mission end.
 
-    Kills are all this plugin credits. Mission awards (CSAR, logistics) are
-    credited by CreditSystem and labelled by the plugin that earned them, so
-    they keep their own credits_log events. Requires points_on_rtb: false.
+    Kills are all this plugin credits. Rescues are jsh_csar's and logistics
+    are jsh_logistics'; each pays through CreditSystem itself.
+    Requires points_on_rtb: false.
 
     Two records are kept:
       - credits_log (CreditSystem's): one 'rtb' row per landing.

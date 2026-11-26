@@ -215,6 +215,12 @@ neither MOOSE nor the FunkMan package — only `{X, Z, Alt, AoA}` plus
   marker handler. It needs `alternateParams` carrying the zone from the
   marker's position, or zone items answer *"choose a zone from shop menu"*.
 - `bc` is a mission global (`_G.bc`).
+- **Every logistics job funnels through one place.** Zone capture, upgrade
+  and resupply (cargo or troops), warehouse deliveries and CTLD builds all call
+  `bc:addContribution` (pending reward) and `bc:addTempStat(player, "<stat>", 1)`;
+  landing at a friendly base banks both in `BattleCommander:commitTempStats`,
+  its only caller. Wrapping that method on the live `bc` sees exactly what
+  Foothold paid, once, and nothing a death forfeited. `jsh_logistics` does.
 
 ## Our plugins
 
@@ -234,6 +240,7 @@ neither MOOSE nor the FunkMan package — only `{X, Z, Alt, AoA}` plus
 | `jsh_cq` | Carrier qualification into logbook; real rules, not a lifetime count |
 | `jsh_awards` | Monthly awards board |
 | `jsh_doctor` | `/jsh doctor`: the silent-mistake checks from this file |
+| `jsh_logistics` | Credits per Foothold delivery and per minute flown in a logistics aircraft |
 
 `rankstatus` imports `jsh_ranks.grants` **lazily, inside the method**: at
 module level it would make rankstatus fail to load without `jsh_ranks`, and

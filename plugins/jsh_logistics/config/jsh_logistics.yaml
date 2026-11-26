@@ -1,0 +1,45 @@
+# jsh_logistics -- copy to <bot>/config/plugins/jsh_logistics.yaml on every node.
+#
+# Server credits for logistics pilots, priced per instance:
+#   * each Foothold delivery, paid when Foothold banks it on landing
+#   * every N minutes flown in a logistics aircraft, paid on landing
+#
+# Sections are keyed on the INSTANCE name from nodes.yaml, never the server
+# name. An instance section lists only what it changes from DEFAULT.
+
+DEFAULT:
+  enabled: true
+  announce_in_game: true
+
+  # Credits per delivery, by Foothold's own stat name. * is a wildcard.
+  # These are the defaults; list only what you want different. 0 = off.
+  deliveries:
+    Zone capture: 50                    # supplies land in a neutral zone and take it
+    Zone upgrade: 30                    # supplies upgrade a friendly zone
+    Zone supply delivery: 25            # supplies restock a friendly zone
+    Zone capture (troops): 30           # troops take a neutral zone
+    Zone supply delivery (troops): 15   # troops dropped into a friendly zone
+    Warehouse delivery: 25              # weapons and fuel stock to an airbase
+    Built FARP: 40                      # CTLD crates built into a FARP
+    Built *: 30                         # any other CTLD build (HAWK, NASAMS, SA-8 ...)
+    Upgraded *: 20                      # CTLD upgrade of a built SAM system
+
+  # Credits for time AIRBORNE in a logistics aircraft: `credits` for every
+  # `minutes` flown, paid on landing. Leftover seconds carry to the next
+  # landing. Losing the aircraft forfeits the unlanded time.
+  airtime:
+    enabled: true
+    minutes: 1
+    credits: 1
+    aircraft: [C-130J-30, Hercules, CH-47Fbl1, UH-1H, Mi-8MT]
+    sample_seconds: 10
+
+# Example: double airtime and no troop rewards on one instance.
+#
+# your-instance-name:
+#   airtime:
+#     minutes: 1
+#     credits: 2
+#   deliveries:
+#     Zone capture (troops): 0
+#     Zone supply delivery (troops): 0

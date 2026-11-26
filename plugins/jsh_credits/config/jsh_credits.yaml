@@ -83,6 +83,32 @@ DEFAULT:
     paid: 'Credits collected at {place}: +{points}. Balance {old_points} -> {new_points}.'
     lost: 'You lost {points} pending credits ({reason}).'
     salvaged: 'You went down with {points} pending ({reason}). {kept} recovered, {lost} lost.'
+    streak: 'Sortie streak {streak}: +{bonus} bonus credits ({bonus_percent}%). Keep coming home.'
+
+  # --------------------------------------------------------- sortie streak
+  #
+  # A bonus for pilots who keep coming home. Every landing that PAYS counts
+  # as a sortie; consecutive ones build a streak, and the bonus is a percent
+  # of that landing's own payout:
+  #
+  #   sortie 1: nothing   sortie 2: 10%   sortie 3: 15%   sortie 4: 20% ... 50%
+  #
+  # A crash, ejection, pilot death or self-kill resets it -- with or without
+  # credits pending. Landing with nothing pending neither counts nor resets,
+  # so touch-and-goes can't farm it. Written to credits_log as its own row.
+  #
+  # Foothold's own "same aircraft bonus" (TurnaroundRewardPercent) is flat,
+  # covers only the next sortie, and pays Foothold coalition funds; this one
+  # pays server credits and grows.
+  sortie_bonus:
+    enabled: true
+    base_percent: 10        # the bonus when the streak first earns one
+    step_percent: 5         # + this per further sortie (0 = flat)
+    max_percent: 50
+    min_sorties: 2          # 2 = from the second sortie, like Foothold; 1 = from the first
+    same_aircraft: true     # changing slot ends the streak, as in Foothold
+    keep_on_disconnect: false
+    event: streak_bonus
 
   # ----------------------------------------------------- credits_log remark
   #

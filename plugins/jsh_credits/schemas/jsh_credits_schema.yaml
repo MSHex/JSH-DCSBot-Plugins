@@ -32,12 +32,14 @@ schema;messages:
   desc: >-
     In-game message text. An empty string silences that one message.
     Placeholders: {points}, {total}, {reason}, {kept}, {lost}, {old_points},
-    {new_points}, {place}.
+    {new_points}, {place}; on paid and streak also {bonus}, {streak},
+    {bonus_percent}.
   mapping:
     held: {type: str, nullable: false, desc: "Shown when credits are earned but held pending a safe landing.", example: "{points} credits held until you land."}
     paid: {type: str, nullable: false, desc: "Shown on payout. Carries the balance either side, so it is worth a longer message_timeout.", example: "Paid {points} credits at {place}. Balance {new_points}."}
     lost: {type: str, nullable: false, desc: "Shown when held credits are lost. {reason} is crash, eject, pilot_death, self_kill, disconnect or slot change.", example: "Lost {points} credits ({reason})."}
     salvaged: {type: str, nullable: false, desc: "Shown when only part of the held credits survive.", example: "Kept {kept} of {points} credits ({reason})."}
+    streak: {type: str, nullable: false, desc: "Shown after a payout that earned a sortie-streak bonus. Empty to fold it into `paid` instead.", example: "Sortie streak {streak}: +{bonus} bonus ({bonus_percent}%)."}
 
 schema;partial_events:
   type: map
@@ -100,6 +102,62 @@ schema;element_schema:
       example: "20"
     messages:
       include: 'messages'
+    sortie_bonus:
+      type: map
+      nullable: false
+      desc: >-
+        A bonus on each landing payout for pilots who keep coming home: from
+        the min_sorties-th consecutive paid landing, base_percent of that
+        landing's credits, step_percent more for each sortie after, up to
+        max_percent. A crash, ejection or death resets it.
+      mapping:
+        enabled:
+          type: bool
+          nullable: false
+          desc: Pay the streak bonus on this instance.
+          example: "true"
+        base_percent:
+          type: number
+          nullable: false
+          range: {min: 0}
+          desc: Bonus, as a percent of the landing's payout, when the streak first earns one.
+          example: "10"
+        step_percent:
+          type: number
+          nullable: false
+          range: {min: 0}
+          desc: Added for each further consecutive sortie. 0 keeps the bonus flat.
+          example: "5"
+        max_percent:
+          type: number
+          nullable: false
+          range: {min: 0}
+          desc: The bonus never goes above this.
+          example: "50"
+        min_sorties:
+          type: int
+          nullable: false
+          range: {min: 1}
+          desc: >-
+            The consecutive paid landing that earns the base bonus. 2 pays from
+            the second sortie, like Foothold's same-aircraft bonus; 1 pays from
+            the first.
+          example: "2"
+        same_aircraft:
+          type: bool
+          nullable: false
+          desc: A slot change ends the streak, as Foothold's same-aircraft bonus does.
+          example: "true"
+        keep_on_disconnect:
+          type: bool
+          nullable: false
+          desc: Keep the streak through a disconnect instead of ending it.
+          example: "false"
+        event:
+          type: str
+          nullable: false
+          desc: credits_log event the bonus is written under, separate from 'rtb'.
+          example: streak_bonus
     remark_detail:
       type: int
       nullable: false

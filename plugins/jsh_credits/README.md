@@ -182,6 +182,52 @@ The two therefore do not double-pay. If you would rather only one ran, set
 `enabled: false` under `refuelling:` for the Foothold instances, or set
 Foothold's `RefuelReward` to 0.
 
+## Sortie streak bonus
+
+A bonus for pilots who **keep coming home**. Every landing that pays counts as
+a sortie. Consecutive ones build a streak, and from the second one the landing
+pays a bonus on top, as a percent of that landing's own payout:
+
+| Sortie in a row | 1 | 2 | 3 | 4 | 5 | … | 10+ |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Bonus (defaults) | — | 10% | 15% | 20% | 25% | … | 50% (cap) |
+
+- **A crash, ejection, pilot death or self-kill resets it**, whether or not
+  credits were pending.
+- **A slot change resets it** with `same_aircraft: true`, as Foothold's
+  same-aircraft bonus does.
+- **A disconnect resets it** unless `keep_on_disconnect: true`.
+- **A mission end resets it.**
+- **A landing with nothing pending neither counts nor resets it**, so
+  touch-and-goes can't farm it.
+- The bonus is its own `credits_log` row under `streak_bonus`, next to the
+  `rtb` row, and the pilot sees it in game (the `streak` message).
+
+Foothold's own *same-aircraft bonus* (`TurnaroundRewardPercent`, 10% by
+default) works differently:
+
+- it is flat
+- it only covers the next sortie flown in the same airframe
+- it pays in Foothold coalition funds, which never reach server credits
+
+This bonus pays **server credits** and grows. The two stack without
+interfering.
+
+```yaml
+DEFAULT:
+  sortie_bonus:
+    enabled: true
+    base_percent: 10      # the bonus when the streak first earns one
+    step_percent: 5       # + this per further sortie (0 = flat, like Foothold)
+    max_percent: 50
+    min_sorties: 2        # 2 = from the second sortie; 1 = from the first
+    same_aircraft: true
+    keep_on_disconnect: false
+```
+
+Every value can be set per instance. Streaks live in memory, so a bot restart
+starts everyone at zero.
+
 ## Landing validation
 
 `lua/mission.lua` is injected into the running mission at mission load and on
